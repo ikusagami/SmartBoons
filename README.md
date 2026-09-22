@@ -10,6 +10,11 @@ The mod does not make a Mage cast a Boon on demand. Instead, once the game AI ha
 2. Copy `SmartBoons.lua` to `<Dragon's Dogma 2>/reframework/autorun/`.
 3. Launch the game and open the REFramework menu to configure **SmartBoons**.
 
+**OR**
+
+1. Download the .zip from "<> Code" button in this page.
+2. Be smart and drag the zip into [Fluffy Mod Manager](https://www.nexusmods.com/dragonsdogma2/mods/1).
+
 ## How it works
 
 Each mapped enemy has an ordered list of preferred Boons. The Mage uses the first Boon in that order which is actually equipped by that specific Pawn.
