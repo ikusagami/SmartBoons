@@ -38,12 +38,28 @@ When no relevant boss is present, the mod may use a mapped common enemy within i
 
 The target-selection setting changes which factor is evaluated first when multiple eligible enemies exist:
 
-- **Nearest boss (default):** distance is the primary rule. If two targets are within the configured *Distance tie range*, priority decides between them.
-- **Highest priority boss:** priority is the primary rule. Distance decides only when priorities are equal.
+**"Nearest boss (default)"** is the most "natural" mode:
+- The mod selects the boss closest to the Arisen.
+- If two bosses are within the "distance tie range" of each other, the configured priority breaks the tie.
 
-Example: with a Drake at 10 m and a Garm at 30 m, *Nearest boss* selects the Drake. If the two targets are only 10 m apart and the tie range is 15 m, priority breaks the tie. With *Highest priority boss*, the highest configured priority wins anywhere inside the maximum boss distance.
+This is useful when you want the Mage to respond to the enemy the party is currently facing.
 
-The same distance-and-priority logic is used when choosing among common enemies, but common enemies are considered only after no boss qualifies.
+Example: Drake at 8m, Griffin at 45m → The Drake determines the Boon, even if the Griffin has higher priority.
+
+**"Highest configured priority"** is the most "strategic" mode:
+- The mod selects the boss with the highest configured priority, provided it is within the "Max boss distance."
+
+- Distance is only used as a tie-breaker if priorities are equal.
+This is useful when specific bosses should always determine the buff while in the fight, even if another boss is momentarily closer.
+
+Example: Dragon (priority 110) at 70m, Griffin (priority 40) at 8m → Dragon determines the Boon.
+
+In practice:
+
+- Use **"Nearest boss"** for dynamic fights involving multiple bosses.
+- Use **"Highest configured priority"** if you want to establish a fixed hierarchy—such as Dragon > Drake > Griffin—regardless of which one is closer.
+
+In both modes, common enemies are only considered if **no** eligible boss exists.
 
 ## Wet and Oiled rules
 
