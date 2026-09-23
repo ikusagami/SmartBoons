@@ -2,145 +2,25 @@ local MOD_NAME = "SmartBoons"
 
 -- Operational logs are always available. Developer-only discovery logging is controlled in the UI.
 local LOG_ENABLED = true
-local DEFAULT_BOSS_DISTANCE_TIE_METERS = 15.0
+local DEFAULT_TARGET_DISTANCE_TIE_METERS = 15.0 -- Shared by boss and common-enemy target selection.
 local DEFAULT_BOSS_MAX_DISTANCE_METERS = 50.0 -- A mapped boss beyond this distance is not considered part of the current fight.
 local DEFAULT_COMMON_ENEMY_MAX_DISTANCE_METERS = 25.0 -- Common enemies never override a relevant boss.
 local STATUS_DISCOVERY_TARGET_ID = nil -- Nearest living enemy; set an exact CharacterID only for a fixed discovery target.
 local STATUS_PROBE_INTERVAL_SECONDS = 1.0
 
+-- REFramework script resets do not necessarily clear Lua's require cache.
+-- Reload local data modules so mapping edits are immediately testable.
+local function load_local_module(module_name)
+	package.loaded[module_name] = nil
+	return require(module_name)
+end
+
 -- Exact CharacterID values from EnemyManager, ordered by boss priority.
-local DEFAULT_BOSS_RULES_BY_CHARACTER_ID = {
-
-	["ch257000_00"] = { name = "Drake", priority = 100, boons = { 30, 31 } },
-	["ch257001_00"] = { name = "Lesser Dragon", priority = 95, boons = { 31, 30 }, wet_boon = 30 },
-	["ch254001_00"] = { name = "Gorechimera", priority = 60, boons = { 29, 31 } },
-	["ch253000_00"] = { name = "Griffin", priority = 40, boons = { 29, 30 } },
-	["ch260000_00"] = { name = "Garm", priority = 40, boons = { 29, 30 }, wet_boon = 30 },
-	["ch260001_00"] = { name = "Warg", priority = 40, boons = { 29, 30 }, wet_boon = 30 },
-	["ch251000_00"] = { name = "Ogre", priority = 40, boons = { 29, 30 }, wet_boon = 30 },
-	["ch251001_00"] = { name = "Grim Ogre", priority = 40, boons = { 29, 30 }, wet_boon = 30 },
-	["ch256001_00"] = { name = "Goreminotaur", priority = 40, boons = { 29 }, wet_boon = 30 },
-	["ch227001_00"] = { name = "Wight", priority = 40, boons = { 29, 30 } },
-	["ch226003_00"] = { name = "Skeleton Lord", priority = 35, boons = { 30, 31 } },
-	["ch250000_00"] = { name = "Cyclops", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_01"] = { name = "Cyclops (unarmed)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_10"] = { name = "Cyclops (arm/leg armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_11"] = { name = "Cyclops (leg/face armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_12"] = { name = "Cyclops (arm/leg/face armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_20"] = { name = "Cyclops (arm/leg/body armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_21"] = { name = "Cyclops (arm/leg/helmet armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-	["ch250000_22"] = { name = "Cyclops (full armor)", priority = 30, boons = { 31 }, wet_boon = 30, oil_boon = 29 },
-
-	-- can easily be affected by elemental status effects
-	["ch256000_00"] = { name = "Minotaur", priority = 40, boons = {29}, wet_boon = 30 },
-
-	-- Mapped for future status rules; no normal elemental preference is forced.
-	["ch254000_00"] = { name = "Chimera", priority = 2, boons = {}, wet_boon = 30, oil_boon = 29 },
-	["ch227000_00"] = { name = "Lich", priority = 2, boons = {}, oil_boon = 29 },
-	["ch254000_40"] = { name = "Corrupted Chimera", priority = 1, boons = {} },
-	["ch255000_01"] = { name = "Medusa", priority = 1, boons = {} },
-	["ch253001_00"] = { name = "Sphinx", priority = 1, boons = {} },
-	["ch229000_00"] = { name = "Dullahan", priority = 1, boons = {} },
-
-	-- Last boss, there's no priority needed
-	["ch258000_00"] = { name = "Dragon", priority = 1, boons = { 30, 31 } },
-
-}
+local DEFAULT_BOSS_RULES_BY_CHARACTER_ID = load_local_module("SmartBoons/BossRules")
 
 -- Common enemies are considered only when no living mapped boss is in range.
 -- Empty Boon lists deliberately preserve the Mage's normal choice; their Wet/Oil behavior remains configurable in the UI.
-local DEFAULT_COMMON_RULES_BY_CHARACTER_ID = {
-	-- Goblin family: no normal elemental preference.
-	["ch220000_00"] = { name = "Goblin", priority = 1, boons = {} },
-	["ch220000_02"] = { name = "Goblin (shield)", priority = 1, boons = {} },
-	["ch220000_03"] = { name = "Goblin (thrower)", priority = 1, boons = {} },
-	["ch220000_04"] = { name = "Goblin leader", priority = 1, boons = {} },
-	["ch220000_10"] = { name = "Goblin (strong)", priority = 1, boons = {} },
-	["ch220000_12"] = { name = "Goblin (strong shield)", priority = 1, boons = {} },
-	["ch220000_13"] = { name = "Goblin (strong thrower)", priority = 1, boons = {} },
-	["ch220000_14"] = { name = "Goblin leader (strong)", priority = 1, boons = {} },
-	-- Hobgoblin family
-	["ch220001_00"] = { name = "Hobgoblin", priority = 12, boons = { 31 } },
-	["ch220001_02"] = { name = "Hobgoblin (thrower)", priority = 12, boons = { 31 } },
-	["ch220001_03"] = { name = "Hobgoblin leader", priority = 12, boons = { 31 } },
-	["ch220001_10"] = { name = "Hobgoblin (strong)", priority = 12, boons = { 31 } },
-	["ch220001_12"] = { name = "Hobgoblin (strong thrower)", priority = 12, boons = { 31 } },
-	["ch220001_13"] = { name = "Hobgoblin leader (strong)", priority = 12, boons = { 31 } },
-	["ch220001_20"] = { name = "Hobgoblin (purple)", priority = 12, boons = { 31 } },
-	["ch220001_22"] = { name = "Hobgoblin (purple thrower)", priority = 12, boons = { 31 } },
-	["ch220001_23"] = { name = "Hobgoblin leader (purple)", priority = 12, boons = { 31 } },
-	["ch220001_40"] = { name = "Hobgoblin (corrupted)", priority = 14, boons = { 31, 30 } },
-	["ch220001_41"] = { name = "Hobgoblin fighter (corrupted)", priority = 14, boons = { 31, 30 } },
-	["ch220001_42"] = { name = "Hobgoblin thrower (corrupted)", priority = 14, boons = { 31, 30 } },
-	["ch220001_43"] = { name = "Hobgoblin leader (corrupted)", priority = 14, boons = { 31, 30 } },
-	-- Chopper family
-	["ch220002_00"] = { name = "Chopper", priority = 12, boons = { 29, 31 } },
-	["ch220002_03"] = { name = "Chopper leader", priority = 12, boons = { 29, 31 } },
-	-- Knacker family
-	["ch220003_00"] = { name = "Knacker", priority = 12, boons = { 30, 31 } },
-	["ch220003_03"] = { name = "Knacker leader", priority = 12, boons = { 30, 31 } },
-	-- Group of annoying lizards
-	["ch221000_00"] = { name = "Saurian", priority = 15, boons = { 30, 31 } },
-	["ch221001_00"] = { name = "Asp", priority = 14, boons = { 31 } },
-	["ch221002_00"] = { name = "Rattler", priority = 15, boons = { 30, 31 } },
-	["ch221002_20"] = { name = "Rattler (purple)", priority = 15, boons = { 30, 31 } },
-	["ch221003_00"] = { name = "Magma Scale", priority = 15, boons = { 30, 31 } },
-	["ch221004_00"] = { name = "Serpent", priority = 15, boons = { 30, 29 } },
-	-- Harpy group
-	["ch222000_00"] = { name = "Harpy", priority = 12, boons = { 29 } },
-	["ch222001_00"] = { name = "Venin Harpy", priority = 12, boons = { 29 } },
-	["ch222002_00"] = { name = "Gore Harpy", priority = 14, boons = { 30, 31 } },
-	["ch222003_00"] = { name = "Succubus", priority = 14, boons = { 31, 29 } },
-	["ch222003_20"] = { name = "Succubus (purple)", priority = 14, boons = { 31, 29 } },
-	["ch223000_00"] = { name = "Wolf", priority = 12, boons = { 29, 31 } },
-	["ch223001_00"] = { name = "Redwolf", priority = 14, boons = { 30, 31 } },
-	["ch223001_01"] = { name = "Redwolf alpha", priority = 14, boons = { 30, 31 } },
-	-- These contains special interactions that are not yet fully understood.
-	["ch224000_00"] = { name = "Slime", priority = 10, boons = { 30, 31 } },
-	["ch224001_00"] = { name = "Ooze", priority = 10, boons = {} },
-	["ch224002_00"] = { name = "Sludge", priority = 10, boons = { 30, 31 } },
-	-- Phantom group
-	["ch225000_00"] = { name = "Phantom", priority = 1, boons = {} },
-	["ch225001_00"] = { name = "Phantasm", priority = 1, boons = {} },
-	["ch225002_00"] = { name = "Specter", priority = 1, boons = {} },
-	-- Skeleton family
-	["ch226000_00"] = { name = "Skeleton", priority = 12, boons = { 30, 31 } },
-	["ch226000_01"] = { name = "Skeleton fighter (unarmored)", priority = 12, boons = { 30, 31 } },
-	["ch226001_01"] = { name = "Skeleton fighter", priority = 12, boons = { 30, 31 } },
-	["ch226001_03"] = { name = "Skeleton mage", priority = 12, boons = { 30, 31 } },
-	["ch226001_05"] = { name = "Skeleton warrior", priority = 12, boons = { 30, 31 } },
-	["ch226001_06"] = { name = "Skeleton sorcerer", priority = 12, boons = { 30, 31 } },
-	["ch226002_01"] = { name = "Skeleton fighter (strong)", priority = 12, boons = { 30, 31 } },
-	["ch226002_03"] = { name = "Skeleton mage (strong)", priority = 12, boons = { 30, 31 } },
-	["ch226002_05"] = { name = "Skeleton warrior (strong)", priority = 12, boons = { 30, 31 } },
-	["ch226002_06"] = { name = "Skeleton sorcerer (strong)", priority = 12, boons = { 30, 31 } },
-	-- Undead family
-	["ch228000_00"] = { name = "Undead", priority = 12, boons = { 29 } },
-	["ch228000_01"] = { name = "Undead (Battahl)", priority = 12, boons = { 29 } },
-	["ch228001_00"] = { name = "Undead (female)", priority = 12, boons = { 29 } },
-	["ch228001_01"] = { name = "Undead (Battahl female)", priority = 12, boons = { 29 } },
-	["ch228002_00"] = { name = "Stout Undead", priority = 14, boons = {} },
-	-- Human group
-	["ch230000_01"] = { name = "Rogue fighter", priority = 1, boons = {} },
-	["ch230000_02"] = { name = "Rogue archer", priority = 1, boons = {} },
-	["ch230000_03"] = { name = "Rogue mage", priority = 1, boons = {} },
-	["ch230000_04"] = { name = "Rogue thief", priority = 1, boons = {} },
-	["ch230001_01"] = { name = "Lost Mercenary fighter", priority = 1, boons = {} },
-	["ch230001_02"] = { name = "Lost Mercenary archer", priority = 1, boons = {} },
-	["ch230001_03"] = { name = "Lost Mercenary mage", priority = 1, boons = {} },
-	["ch230001_04"] = { name = "Lost Mercenary thief", priority = 1, boons = {} },
-	["ch230001_05"] = { name = "Lost Mercenary warrior", priority = 1, boons = {} },
-	["ch230001_06"] = { name = "Lost Mercenary sorcerer", priority = 1, boons = {} },
-	["ch230002_01"] = { name = "Lost Mercenary fighter (strong)", priority = 1, boons = {} },
-	["ch230002_02"] = { name = "Lost Mercenary archer (strong)", priority = 1, boons = {} },
-	["ch230002_03"] = { name = "Lost Mercenary mage (strong)", priority = 1, boons = {} },
-	["ch230002_04"] = { name = "Lost Mercenary thief (strong)", priority = 1, boons = {} },
-	["ch230002_05"] = { name = "Lost Mercenary warrior (strong)", priority = 1, boons = {} },
-	["ch230002_06"] = { name = "Lost Mercenary sorcerer (strong)", priority = 1, boons = {} },
-	["ch230012_02"] = { name = "Coral Snake archer", priority = 1, boons = {} },
-	["ch230012_04"] = { name = "Coral Snake thief", priority = 1, boons = {} },
-	["ch230100_04"] = { name = "Scavenger", priority = 12, boons = { 31 } },
-}
+local DEFAULT_COMMON_RULES_BY_CHARACTER_ID = load_local_module("SmartBoons/CommonRules")
 
 local BOON_NAMES = {
 	[29] = "Fire Boon",
@@ -193,7 +73,7 @@ local function make_default_config()
 		status_discovery_enabled = false,
 		max_boss_distance = DEFAULT_BOSS_MAX_DISTANCE_METERS,
 		max_common_enemy_distance = DEFAULT_COMMON_ENEMY_MAX_DISTANCE_METERS,
-		distance_tie = DEFAULT_BOSS_DISTANCE_TIE_METERS,
+		distance_tie = DEFAULT_TARGET_DISTANCE_TIE_METERS,
 		target_selection_mode = "nearest",
 		enemy_overrides = {},
 	}
@@ -1015,22 +895,7 @@ local OIL_VALUES = { "default", 0, 29, 30, 31 }
 
 -- Family presets are intentionally limited to variants that share a gameplay family.
 -- A preset is applied only when the user presses its button in the selected rule.
-local RULE_FAMILIES = {
-	{ name = "Goblin", members = { "ch220000_00", "ch220000_02", "ch220000_03", "ch220000_04", "ch220000_10", "ch220000_12", "ch220000_13", "ch220000_14" } },
-	{ name = "Hobgoblin", members = { "ch220001_00", "ch220001_02", "ch220001_03", "ch220001_10", "ch220001_12", "ch220001_13", "ch220001_20", "ch220001_22", "ch220001_23" } },
-	{ name = "Corrupted Hobgoblin", members = { "ch220001_40", "ch220001_41", "ch220001_42", "ch220001_43" } },
-	{ name = "Chopper", members = { "ch220002_00", "ch220002_03" } },
-	{ name = "Knacker", members = { "ch220003_00", "ch220003_03" } },
-	{ name = "Rattler", members = { "ch221002_00", "ch221002_20" } },
-	{ name = "Succubus", members = { "ch222003_00", "ch222003_20" } },
-	{ name = "Redwolf", members = { "ch223001_00", "ch223001_01" } },
-	{ name = "Skeleton", members = { "ch226000_00", "ch226000_01", "ch226001_01", "ch226001_03", "ch226001_05", "ch226001_06", "ch226002_01", "ch226002_03", "ch226002_05", "ch226002_06" } },
-	{ name = "Undead", members = { "ch228000_00", "ch228000_01", "ch228001_00", "ch228001_01", "ch228002_00" } },
-	{ name = "Rogue", members = { "ch230000_01", "ch230000_02", "ch230000_03", "ch230000_04" } },
-	{ name = "Lost Mercenary", members = { "ch230001_01", "ch230001_02", "ch230001_03", "ch230001_04", "ch230001_05", "ch230001_06", "ch230002_01", "ch230002_02", "ch230002_03", "ch230002_04", "ch230002_05", "ch230002_06" } },
-	{ name = "Coral Snake", members = { "ch230012_02", "ch230012_04" } },
-	{ name = "Cyclops", members = { "ch250000_00", "ch250000_01", "ch250000_10", "ch250000_11", "ch250000_12", "ch250000_20", "ch250000_21", "ch250000_22" } },
-}
+local RULE_FAMILIES = load_local_module("SmartBoons/Families")
 
 local function family_matches(family, character_id)
 	for _, member_id in ipairs(family.members) do
@@ -1186,7 +1051,7 @@ re.on_draw_ui(function()
 	changed, value = imgui.drag_float("Distance tie range", config.distance_tie, 1.0, 0.0, 1000.0)
 	if changed then config.distance_tie = value; ui_state.dirty = true end
 	if imgui.is_item_hovered() then
-		imgui.set_tooltip("In Nearest boss mode, targets within this distance of each other are treated as tied and priority decides the winner.")
+		imgui.set_tooltip("In Nearest mode, eligible bosses or common enemies within this distance of each other are treated as tied and priority decides the winner.")
 	end
 
 	local selection_options = { "Nearest boss (default)", "Highest priority boss" }
@@ -1197,7 +1062,7 @@ re.on_draw_ui(function()
 		ui_state.dirty = true
 	end
 	if imgui.is_item_hovered() then
-		imgui.set_tooltip("Nearest keeps the current behavior. Priority picks the configured highest-priority boss, then distance breaks ties.")
+		imgui.set_tooltip("Nearest selects the closest eligible target. Priority selects the eligible target with the highest configured priority; distance breaks equal-priority ties.")
 	end
 
 	imgui.separator()
@@ -1371,7 +1236,7 @@ re.on_draw_ui(function()
 	if imgui.button("Save configuration") then
 		if save_config() then ui_state.dirty = false end
 	end
-	if ui_state.dirty then imgui.text_colored("Unsaved configuration changes", 0xff66bb66) end
+	if ui_state.dirty then imgui.text_colored("Unsaved configuration changes", 0xff5252e0) end
 	imgui.pop_item_width()
 	imgui.tree_pop()
 end)
