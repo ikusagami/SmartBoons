@@ -52,6 +52,7 @@ Example: Drake at 8m, Griffin at 45m → The Drake determines the Boon, even if 
 **"Highest configured priority"** is the most "strategic" mode:
 
 The mod selects the boss with the highest configured priority, provided it is within the "Max boss distance."
+
 Distance is only used as a tie-breaker if priorities are equal.
 
 This is useful when specific bosses should always determine the buff while in the fight, even if another boss is momentarily closer.
@@ -60,8 +61,9 @@ Example: Dragon (priority 110) at 70m, Griffin (priority 40) at 8m → Dragon de
 
 In practice:
 
-Use **"Nearest boss"** for dynamic fights involving multiple bosses.
-Use **"Highest configured priority"** if you want to establish a fixed hierarchy—such as Dragon > Drake > Griffin—regardless of which one is closer.
+- Use **"Nearest boss"** for dynamic fights involving multiple bosses.
+
+- Use **"Highest configured priority"** if you want to establish a fixed hierarchy—such as Dragon > Drake > Griffin—regardless of which one is closer.
 
 In both modes, common enemies are only considered if no eligible boss exists.
 
