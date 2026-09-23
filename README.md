@@ -13,7 +13,7 @@ The mod does not make a Mage cast a Boon on demand. Instead, once the game AI ha
 **OR**
 
 1. Download the `.zip` from the `<> Code` button on this page.
-2. Drag the ZIP into Fluffy Mod Manager and install it normally.
+2. Drag the `.zip` into Fluffy Mod Manager and install it normally.
 
 ## How it works
 
