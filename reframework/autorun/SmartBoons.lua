@@ -177,29 +177,16 @@ local function save_config()
 end
 
 local state = {
-	create_command_hook_installed = false,
 	pack_hook_installed = false,
-	logged_enemy_tracks = {},
-	logged_schemas = {},
-	logged_argument_shapes = {},
-	logged_pack_commands = {},
-	logged_enemy_manager_catalog = false,
 	character_id_names = {},
 	last_active_boss_key = nil,
-	logged_boss_life_surfaces = {},
 	logged_dead_bosses = {},
 	logged_distant_bosses = {},
-	logged_status_schema = false,
 	last_status_probe_time = 0,
 	last_status_snapshot = nil,
 	status_condition_ids = nil,
 	logged_status_candidate_names = false,
 	last_weather_boon_state = {},
-	logged_actor_sources = {},
-	logged_replacement_surface = false,
-	pack_stage_logged = false,
-	equipped_probe_logged = false,
-	pending_create_args = nil,
 }
 
 local function log(message)
@@ -276,102 +263,8 @@ local function resolve_character_id_name(value)
 	return nil
 end
 
-local function dump_schema_once(object, label)
-	if not developer_mode_enabled() or object == nil or state.logged_schemas[label] then return end
-	object = managed_object(object)
-	local ok, td = pcall(function() return object:get_type_definition() end)
-	if not ok or td == nil then return end
-	state.logged_schemas[label] = true
-	local methods, fields = {}, {}
-	for _, method in ipairs(td:get_methods() or {}) do methods[#methods + 1] = tostring(method:get_name()) end
-	for _, field in ipairs(td:get_fields() or {}) do fields[#fields + 1] = tostring(field:get_name()) end
-	log(string.format("schema %s type=%s methods=%s fields=%s", label, describe_object(object), table.concat(methods, ","), table.concat(fields, ",")))
-end
-
-local function describe_command(command, label)
-	if command == nil then return label .. "=nil" end
-	return string.format("%s=%s skill=%s", label, describe_object(command), tostring(call_method(command, "get_CustomSkillID")))
-end
-
-local function describe_enemy_track(action_interface)
-	if action_interface == nil then return "enemy=nil" end
-	dump_schema_once(action_interface, "ActionInterface")
-	local action_type = sdk.find_type_definition("app.ActionInterface")
-	local field = action_type and action_type:get_field("<EnemyTrack>k__BackingField")
-	if field == nil then return "enemy=EnemyTrackFieldUnavailable" end
-	local ok, enemy_track = pcall(function() return field:get_data(action_interface) end)
-	if not ok or enemy_track == nil then return "enemy=nil" end
-	enemy_track = managed_object(enemy_track)
-	dump_schema_once(enemy_track, "EnemyTrack")
-	return "enemy=" .. describe_object(enemy_track)
-end
-
-local function record_enemy_track(action_interface)
-	-- Owner discovery is intentionally separate from EnemyTrack; it does not affect selection.
-	if developer_mode_enabled() and action_interface ~= nil then
-		local key = "ActionInterface:" .. describe_address(action_interface)
-		if not state.logged_actor_sources[key] then
-			state.logged_actor_sources[key] = true
-			local values = {}
-			for _, name in ipairs({ "get_Character", "get_OwnerCharacter", "get_Human", "get_Pawn", "get_Owner", "get_ParentCharacter" }) do
-				values[#values + 1] = name .. "=" .. describe_object(managed_object(call_method(action_interface, name)))
-			end
-			log("actor owner probe: source=ActionInterface address=" .. describe_address(action_interface) .. " " .. table.concat(values, " | "))
-		end
-	end
-	local enemy_type = describe_enemy_track(action_interface):gsub("^enemy=", "")
-	if developer_mode_enabled() and enemy_type ~= "nil" and enemy_type ~= "" and not state.logged_enemy_tracks[enemy_type] then
-		state.logged_enemy_tracks[enemy_type] = true
-		log("enemy track discovered: " .. enemy_type)
-	end
-	return enemy_type
-end
-
-local function probe_owner_surface_once(object, label)
-	if not developer_mode_enabled() or object == nil or state.logged_actor_sources[label] then return end
-	state.logged_actor_sources[label] = true
-	object = managed_object(object)
-	local td = object:get_type_definition()
-	local methods, fields = {}, {}
-	for _, method in ipairs(td and td:get_methods() or {}) do
-		local name = tostring(method:get_name())
-		local lower = name:lower()
-		if lower:find("character", 1, true) or lower:find("owner", 1, true) or lower:find("human", 1, true) or lower:find("pawn", 1, true) or lower:find("action", 1, true) then
-			methods[#methods + 1] = name
-		end
-	end
-	for _, field in ipairs(td and td:get_fields() or {}) do
-		local name = tostring(field:get_name())
-		local lower = name:lower()
-		if lower:find("character", 1, true) or lower:find("owner", 1, true) or lower:find("human", 1, true) or lower:find("pawn", 1, true) or lower:find("action", 1, true) then
-			local value = get_field_data(object, name)
-			fields[#fields + 1] = name .. "=" .. describe_object(value)
-		end
-	end
-	log(string.format("actor owner surface: source=%s type=%s methods=%s fields=%s", label, describe_object(object), table.concat(methods, ","), table.concat(fields, ",")))
-end
-
 local get_best_equipped_boon
 local is_actor_boon_equipped
-
-local function probe_enemy_manager_once()
-	if not developer_mode_enabled() or state.logged_enemy_manager_catalog then return end
-	local manager = sdk.get_managed_singleton("app.EnemyManager")
-	local list = get_field_data(manager, "_EnemyList")
-	local count = tonumber(call_method(list, "get_Count")) or 0
-	if count <= 0 then return end
-
-	state.logged_enemy_manager_catalog = true
-	local entries = {}
-	for index = 0, math.min(count - 1, 63) do
-		local entry = managed_object(call_method(list, "get_Item", index))
-		local character = get_field_data(entry, "_Chara") or get_field_data(entry, "<Chara>k__BackingField")
-		local character_id = read_enum_value(call_method(character, "get_CharaID"))
-		local character_name = resolve_character_id_name(character_id)
-		entries[#entries + 1] = string.format("%d:%s chara_id=%s name=%s", index, describe_object(character), tostring(character_id), tostring(character_name))
-	end
-	log("EnemyManager catalog: count=" .. tostring(count) .. " entries=" .. table.concat(entries, " | "))
-end
 
 local function get_character_position(character)
 	local transform = get_field_data(character, "<Transform>k__BackingField") or call_method(character, "get_Transform")
@@ -511,26 +404,6 @@ local function probe_status_conditions()
 	end
 
 	local td = controller:get_type_definition()
-	if not state.logged_status_schema then
-		state.logged_status_schema = true
-		local methods, fields = {}, {}
-		for _, method in ipairs(td and td:get_methods() or {}) do
-			local name = tostring(method:get_name())
-			local lower = name:lower()
-			if lower:find("status", 1, true) or lower:find("condition", 1, true) or lower:find("debil", 1, true) or lower:find("freeze", 1, true) or lower:find("wet", 1, true) or lower:find("water", 1, true) then
-				methods[#methods + 1] = name
-			end
-		end
-		for _, field in ipairs(td and td:get_fields() or {}) do
-			local name = tostring(field:get_name())
-			local lower = name:lower()
-			if lower:find("status", 1, true) or lower:find("condition", 1, true) or lower:find("debil", 1, true) or lower:find("freeze", 1, true) or lower:find("wet", 1, true) or lower:find("water", 1, true) then
-				fields[#fields + 1] = name
-			end
-		end
-		log(string.format("status controller schema: target=%s type=%s methods=%s fields=%s", tostring(character_id), describe_object(controller), table.concat(methods, ","), table.concat(fields, ",")))
-	end
-
 	local values = {}
 	for _, field in ipairs(td and td:get_fields() or {}) do
 		local name = tostring(field:get_name())
@@ -547,20 +420,6 @@ local function probe_status_conditions()
 	end
 end
 
-local function log_boss_life_surface_once(character, character_id)
-	if not developer_mode_enabled() or character == nil or state.logged_boss_life_surfaces[character_id] then return end
-	state.logged_boss_life_surfaces[character_id] = true
-	local hit = managed_object(call_method(character, "get_Hit"))
-	for _, item in ipairs({ { "BossCharacter", character }, { "BossHit", hit } }) do
-		local label, object = item[1], item[2]
-		local td = object and object:get_type_definition() or nil
-		local methods, fields = {}, {}
-		for _, method in ipairs(td and td:get_methods() or {}) do methods[#methods + 1] = tostring(method:get_name()) end
-		for _, field in ipairs(td and td:get_fields() or {}) do fields[#fields + 1] = tostring(field:get_name()) end
-		log(string.format("boss life schema: id=%s label=%s type=%s methods=%s fields=%s", character_id, label, describe_object(object), table.concat(methods, ","), table.concat(fields, ",")))
-	end
-end
-
 local function select_active_target(rule_for_character, max_distance, is_boss)
 	local manager = sdk.get_managed_singleton("app.EnemyManager")
 	local list = get_field_data(manager, "_EnemyList")
@@ -572,15 +431,14 @@ local function select_active_target(rule_for_character, max_distance, is_boss)
 		local character = get_field_data(entry, "_Chara") or get_field_data(entry, "<Chara>k__BackingField")
 		local character_id = resolve_character_id_name(call_method(character, "get_CharaID"))
 		local rule = character_id and rule_for_character(character_id) or nil
-		if is_boss and rule ~= nil then log_boss_life_surface_once(character, character_id) end
 		local distance = get_distance_between(get_character_position(character), player_position)
 		if rule ~= nil and not is_boss_alive(character) then
-			if is_boss and not state.logged_dead_bosses[character_id] then
+			if developer_mode_enabled() and is_boss and not state.logged_dead_bosses[character_id] then
 				state.logged_dead_bosses[character_id] = true
 				log("dead boss ignored: " .. rule.name .. " id=" .. character_id)
 			end
 		elseif rule ~= nil and distance > max_distance then
-			if is_boss and not state.logged_distant_bosses[character_id] then
+			if developer_mode_enabled() and is_boss and not state.logged_distant_bosses[character_id] then
 				state.logged_distant_bosses[character_id] = true
 				log(string.format("distant boss ignored: %s id=%s distance=%.1f max=%.1f", rule.name, character_id, distance, max_distance))
 			end
@@ -612,7 +470,7 @@ local function get_highest_active_target()
 		target_type = "common"
 	end
 	local target_key = rule ~= nil and target_type .. ":" .. character_id or nil
-	if target_key ~= state.last_active_boss_key then
+	if developer_mode_enabled() and target_key ~= state.last_active_boss_key then
 		state.last_active_boss_key = target_key
 		if rule ~= nil then
 			log(string.format("active %s selected: %s id=%s distance=%.1f priority=%d", target_type, rule.name, character_id, distance, rule.priority))
@@ -632,7 +490,7 @@ local function get_expected_boon(controller)
 	if target.oil_boon ~= nil then
 		is_oiled, status_flag = is_character_status_active(target_character, "Oil")
 	end
-	if target.wet_boon ~= nil or target.oil_boon ~= nil then
+	if developer_mode_enabled() and (target.wet_boon ~= nil or target.oil_boon ~= nil) then
 		local status_state = tostring(is_wet) .. ":" .. tostring(is_oiled) .. ":" .. tostring(status_flag)
 		if state.last_weather_boon_state[target_id] ~= status_state then
 			state.last_weather_boon_state[target_id] = status_state
@@ -656,34 +514,6 @@ local function get_expected_boon(controller)
 		return selected, source
 	end
 	return nil, target.name .. " (no equipped Boon)"
-end
-
-local function resolve_main_pawn_human()
-	local pawn = nil
-	for _, source in ipairs({
-		{ "app.PawnManager", "get_MainPawn", "<MainPawn>k__BackingField" },
-		{ "app.CharacterManager", "get_MainPawn", "<MainPawn>k__BackingField" },
-		{ "app.CharacterManager", "get_ManualPlayerMainPawn", nil },
-	}) do
-		local manager = sdk.get_managed_singleton(source[1])
-		pawn = call_method(manager, source[2]) or get_field_data(manager, source[3])
-		if pawn ~= nil then break end
-	end
-	if pawn == nil then return nil, nil, nil, "main_pawn_unresolved" end
-
-	local candidates = {
-		pawn,
-		call_method(pawn, "get_CachedCharacter"),
-		call_method(pawn, "get_Character"),
-		call_method(pawn, "get_Chara"),
-		get_field_data(pawn, "<CachedCharacter>k__BackingField"),
-		get_field_data(pawn, "<Character>k__BackingField"),
-	}
-	for _, character in ipairs(candidates) do
-		local human = call_method(character, "get_Human") or get_field_data(character, "<Human>k__BackingField")
-		if human ~= nil then return pawn, character, human, "resolved" end
-	end
-	return pawn, nil, nil, "human_unresolved"
 end
 
 local function is_skill_equipped(skill_context, job_id, skill_id)
@@ -722,44 +552,7 @@ get_best_equipped_boon = function(priority, controller)
 	return nil
 end
 
-local function probe_equipped_skills_once(controller)
-	if not developer_mode_enabled() or state.equipped_probe_logged then return end
-	state.equipped_probe_logged = true
-	dump_schema_once(controller, "BlackBoardController")
-	local pawn, character, human, status = resolve_main_pawn_human()
-	local skill_context = human and (call_method(human, "get_SkillContext") or get_field_data(human, "<SkillContext>k__BackingField")) or nil
-	local job_context = human and (call_method(human, "get_JobContext") or get_field_data(human, "<JobContext>k__BackingField")) or nil
-	local job_id = get_field_data(job_context, "CurrentJob") or call_method(job_context, "get_CurrentJob") or get_field_data(human, "<CurrentJob>k__BackingField") or call_method(human, "get_CurrentJob")
-	log(string.format("equipped skill probe: status=%s pawn=%s character=%s human=%s job=%s skill_context=%s", status, describe_object(pawn), describe_object(character), describe_object(human), tostring(job_id), describe_object(skill_context)))
-	dump_schema_once(human, "MageHuman")
-	dump_schema_once(skill_context, "MageSkillContext")
-	if skill_context ~= nil and job_id ~= nil then
-		local values = {}
-		for skill_id, name in pairs(BOON_NAMES) do
-			values[#values + 1] = string.format("%d=%s", skill_id, tostring(is_skill_equipped(skill_context, job_id, skill_id)))
-		end
-		table.sort(values)
-		log("equipped boon probe: " .. table.concat(values, " | "))
-	end
-end
-
-local function log_replacement_surface_once(command)
-	if not developer_mode_enabled() or command == nil or state.logged_replacement_surface then return end
-	state.logged_replacement_surface = true
-	local td = command:get_type_definition()
-	local methods, fields = {}, {}
-	for _, method in ipairs(td:get_methods() or {}) do
-		local name = tostring(method:get_name())
-		if name:find("Skill", 1, true) or name:find("Custom", 1, true) or name:find("set_", 1, true) then methods[#methods + 1] = name end
-	end
-	for _, field in ipairs(td:get_fields() or {}) do
-		local name = tostring(field:get_name())
-		if name:find("Skill", 1, true) or name:find("Custom", 1, true) then fields[#fields + 1] = name end
-	end
-	log(string.format("boon replacement probe: command=%s methods=%s fields=%s", describe_object(command), table.concat(methods, ","), table.concat(fields, ",")))
-end
-
-local function trace_pack_data(controller, pack_data, pack_target)
+local function trace_pack_data(controller, pack_data)
 	if not config.enabled then return false end
 	if pack_data == nil then return false end
 	-- The blackboard controller belongs to the actor about to dispatch this pack.
@@ -768,10 +561,6 @@ local function trace_pack_data(controller, pack_data, pack_target)
 	local pack = call_method(managed_object(pack_data), "get_Pack")
 	local nodes = call_method(pack, "getActInterNodes")
 	local node = managed_object(call_method(nodes, "get_First"))
-	if developer_mode_enabled() and not state.pack_stage_logged then
-		state.pack_stage_logged = true
-		log(string.format("pack stages: data=%s pack=%s nodes=%s first=%s target=%s", describe_object(pack_data), describe_object(pack), describe_object(nodes), describe_object(node), describe_object(pack_target)))
-	end
 	local visited = 0
 	while node ~= nil and visited < 64 do
 		visited = visited + 1
@@ -780,70 +569,20 @@ local function trace_pack_data(controller, pack_data, pack_target)
 		local primary = call_method(value, "get_PrimaryCommand")
 		local skill_id = normalize_skill_id(call_method(primary, "get_CustomSkillID"))
 		if BOON_NAMES[skill_id] ~= nil then
-			if developer_mode_enabled() and controller ~= nil then
-				local key = "BlackBoard:" .. describe_address(controller)
-				if not state.logged_actor_sources[key] then
-					state.logged_actor_sources[key] = true
-					local values = {}
-					for _, name in ipairs({ "get_Character", "get_ParentCharacter", "get_Human" }) do
-						values[#values + 1] = name .. "=" .. describe_object(managed_object(call_method(controller, name)))
-					end
-					log("actor owner probe: source=BlackBoard address=" .. describe_address(controller) .. " " .. table.concat(values, " | "))
-				end
-			end
-			probe_enemy_manager_once()
-			probe_equipped_skills_once(controller)
-			dump_schema_once(value, "ActInterNode")
-			dump_schema_once(primary, "BoonCommand")
-			dump_schema_once(nodes, "LinkedListNodes")
 			local expected_skill_id, enemy_source = get_expected_boon(controller)
-			local mode = expected_skill_id == nil and "observe" or (skill_id == expected_skill_id and "keep" or "replace")
-			local actor_character = resolve_actor_human(controller)
-			local actor_id = call_method(actor_character, "get_CharaIDString") or describe_object(actor_character)
-			log(string.format("boon candidate: actor=%s skill=%s (%s) enemy=%s expected=%s (%s) mode=%s", tostring(actor_id), tostring(skill_id), BOON_NAMES[skill_id], tostring(enemy_source), tostring(expected_skill_id), BOON_NAMES[expected_skill_id] or "none", mode))
+			if developer_mode_enabled() then
+				local mode = expected_skill_id == nil and "observe" or (skill_id == expected_skill_id and "keep" or "replace")
+				local actor_character = resolve_actor_human(controller)
+				local actor_id = call_method(actor_character, "get_CharaIDString") or describe_object(actor_character)
+				log(string.format("boon candidate: actor=%s skill=%s (%s) enemy=%s expected=%s (%s) mode=%s", tostring(actor_id), tostring(skill_id), BOON_NAMES[skill_id], tostring(enemy_source), tostring(expected_skill_id), BOON_NAMES[expected_skill_id] or "none", mode))
+			end
 			if expected_skill_id ~= nil and skill_id ~= expected_skill_id then
-				log_replacement_surface_once(primary)
 				return true, expected_skill_id, skill_id, controller
 			end
-		elseif developer_mode_enabled() then
-			local signature = describe_command(primary, "primary")
-			if not state.logged_pack_commands[signature] then state.logged_pack_commands[signature] = true; log("pack observed: " .. signature) end
 		end
 		node = next_node
 	end
 	return false
-end
-
-local function trace_create_command(args)
-	if not developer_mode_enabled() then return end
-	local values = {}
-	for index, value in ipairs(args or {}) do values[#values + 1] = string.format("%d=%s", index, describe_object(value)) end
-	local node, action_interface = args and args[2], args and args[3]
-	local shape = table.concat(values, ", ") .. "; " .. describe_command(call_method(node, "get_PrimaryCommand"), "primary") .. "; " .. describe_command(call_method(node, "get_SecondaryCommand"), "secondary") .. "; " .. describe_enemy_track(action_interface)
-	if not state.logged_argument_shapes[shape] then state.logged_argument_shapes[shape] = true; log("createCommand args: " .. shape) end
-end
-
-local function install_create_command_hook()
-	if state.create_command_hook_installed then return true end
-	local td = sdk.find_type_definition("app.ActInterNode")
-	local method = td and td:get_method("createCommand")
-	if method == nil then log("app.ActInterNode.createCommand not available"); return false end
-	sdk.hook(method,
-		function(args)
-			state.pending_create_args = args
-			record_enemy_track(args and args[3] or nil)
-			probe_owner_surface_once(args and args[6] or nil, "ActInterExecutor")
-		end,
-		function(retval)
-			local args = state.pending_create_args
-			state.pending_create_args = nil
-			if args ~= nil then pcall(function() trace_create_command(args) end) end
-			return retval
-		end
-	)
-	state.create_command_hook_installed = true
-	log("EnemyTrack hook installed")
-	return true
 end
 
 local function install_pack_hook()
@@ -853,16 +592,24 @@ local function install_pack_hook()
 	if method == nil then log("setBBValuesToExecuteActInter not available"); return false end
 	sdk.hook(method, function(args)
 		if args == nil then return end
-		local should_replace, expected_skill_id, wrong_skill_id, owner_controller = trace_pack_data(args[2], args[3], args[4])
+		local should_replace, expected_skill_id, wrong_skill_id, owner_controller = trace_pack_data(args[2], args[3])
 		if not should_replace then return end
 		if not is_actor_boon_equipped(owner_controller, expected_skill_id) then
-			log(string.format("ActInter replacement cancelled: expected=%s is not equipped by this action's Mage", tostring(expected_skill_id)))
+			if developer_mode_enabled() then
+				log(string.format("ActInter replacement cancelled: expected=%s is not equipped by this action's Mage", tostring(expected_skill_id)))
+			end
 			return
 		end
 		local path = BOON_PACK_PATH_BY_SKILL[expected_skill_id]
 		local ok_pack, replacement = pcall(function() return sdk.create_userdata("app.ActInterPackData", path) end)
 		local ok_arg = ok_pack and replacement ~= nil and pcall(function() args[3] = sdk.to_ptr(replacement) end)
-		if ok_arg then log(string.format("ActInter pack argument replaced: from=%s to=%s", tostring(wrong_skill_id), tostring(expected_skill_id))) else log("ActInter replacement failed; original dispatch allowed") end
+		if ok_arg then
+			if developer_mode_enabled() then
+				log(string.format("ActInter pack argument replaced: from=%s to=%s", tostring(wrong_skill_id), tostring(expected_skill_id)))
+			end
+		else
+			log("ActInter replacement failed; original dispatch allowed")
+		end
 	end)
 	state.pack_hook_installed = true
 	log("ActInterPack replacement hook installed")
@@ -870,7 +617,6 @@ local function install_pack_hook()
 end
 
 re.on_application_entry("LateUpdateBehavior", function()
-	install_create_command_hook()
 	install_pack_hook()
 	probe_status_conditions()
 end)
