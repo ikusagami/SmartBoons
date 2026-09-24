@@ -473,7 +473,8 @@ local function get_highest_active_target()
 	if developer_mode_enabled() and target_key ~= state.last_active_boss_key then
 		state.last_active_boss_key = target_key
 		if rule ~= nil then
-			log(string.format("active %s selected: %s id=%s distance=%.1f priority=%d", target_type, rule.name, character_id, distance, rule.priority))
+			local max_distance = target_type == "boss" and config.max_boss_distance or config.max_common_enemy_distance
+			log(string.format("active %s selected: %s id=%s distance=%.1f max_distance=%.1f priority=%d selection_mode=%s distance_tie=%.1f", target_type, rule.name, character_id, distance, max_distance, rule.priority, config.target_selection_mode, config.distance_tie))
 		end
 	end
 	return rule, character_id, distance, character, target_type
