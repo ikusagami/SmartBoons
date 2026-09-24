@@ -83,6 +83,7 @@ Open **SmartBoons** from the REFramework script menu. The interface lets you:
 - Set the distance tie range.
 - Choose nearest-first or priority-first target selection.
 - Filter, sort, and search the rule list.
+- Filter rules by their effective primary Boon: Fire, Ice, Thunder, or no primary Boon.
 - Configure each rule's enabled state, priority, normal Boon order, Wet rule, and Oiled rule.
 - Apply settings to all supported variants in an enemy family.
 - Restore a selected rule, a family, or all rules to script defaults.

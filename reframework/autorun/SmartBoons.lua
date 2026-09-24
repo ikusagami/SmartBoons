@@ -79,6 +79,24 @@ local function make_default_config()
 	}
 end
 
+local function positive_number_or_default(value, default)
+	local number = tonumber(value)
+	if number == nil or number < 1 then return default end
+	return number
+end
+
+local function non_negative_number_or_default(value, default)
+	local number = tonumber(value)
+	if number == nil or number < 0 then return default end
+	return number
+end
+
+local function non_negative_integer_or_default(value, default)
+	local number = tonumber(value)
+	if number == nil or number < 0 then return default end
+	return math.floor(number)
+end
+
 local function load_config()
 	local config = make_default_config()
 	local ok, saved = pcall(function() return json.load_file(CONFIG_FILE) end)
@@ -86,9 +104,9 @@ local function load_config()
 	if type(saved.enabled) == "boolean" then config.enabled = saved.enabled end
 	if type(saved.developer_mode) == "boolean" then config.developer_mode = saved.developer_mode end
 	if type(saved.status_discovery_enabled) == "boolean" then config.status_discovery_enabled = saved.status_discovery_enabled end
-	if tonumber(saved.max_boss_distance) ~= nil then config.max_boss_distance = tonumber(saved.max_boss_distance) end
-	if tonumber(saved.max_common_enemy_distance) ~= nil then config.max_common_enemy_distance = tonumber(saved.max_common_enemy_distance) end
-	if tonumber(saved.distance_tie) ~= nil then config.distance_tie = tonumber(saved.distance_tie) end
+	config.max_boss_distance = positive_number_or_default(saved.max_boss_distance, config.max_boss_distance)
+	config.max_common_enemy_distance = positive_number_or_default(saved.max_common_enemy_distance, config.max_common_enemy_distance)
+	config.distance_tie = non_negative_number_or_default(saved.distance_tie, config.distance_tie)
 	if saved.target_selection_mode == "nearest" or saved.target_selection_mode == "priority" then
 		config.target_selection_mode = saved.target_selection_mode
 	end
@@ -106,11 +124,11 @@ local function get_default_rule(character_id)
 	return DEFAULT_BOSS_RULES_BY_CHARACTER_ID[character_id] or DEFAULT_COMMON_RULES_BY_CHARACTER_ID[character_id]
 end
 
-local function get_effective_rule(character_id)
+local function get_effective_rule(character_id, include_disabled_override)
 	local default = get_default_rule(character_id)
 	if default == nil then return nil end
 	local override = config.enemy_overrides[character_id]
-	if type(override) == "table" and override.enabled == false then return nil end
+	if not include_disabled_override and type(override) == "table" and override.enabled == false then return nil end
 	local rule = {
 		name = default.name,
 		priority = default.priority,
@@ -119,7 +137,7 @@ local function get_effective_rule(character_id)
 		oil_boon = default.oil_boon,
 	}
 	if type(override) == "table" then
-		if tonumber(override.priority) ~= nil then rule.priority = tonumber(override.priority) end
+		rule.priority = non_negative_integer_or_default(override.priority, rule.priority)
 		if type(override.boons) == "table" then rule.boons = normalized_boons(override.boons) end
 		if override.wet_boon ~= nil then
 			local boon = tonumber(override.wet_boon)
@@ -145,24 +163,27 @@ end
 
 -- Persist only differences from script defaults. This prevents empty UI edits and
 -- family presets that match a default from being displayed as misleading custom rules.
+local pending_config_rule_ids = {}
+
+local function mark_config_rule_changed(character_id)
+	if character_id ~= nil then pending_config_rule_ids[character_id] = true end
+end
+
 local function normalize_enemy_overrides()
 	local cleaned = {}
 	for character_id, override in pairs(config.enemy_overrides) do
 		local default = get_default_rule(character_id)
 		if default ~= nil and type(override) == "table" then
-			if override.enabled == false then
-				cleaned[character_id] = { enabled = false }
-			else
-				local effective = get_effective_rule(character_id)
-				local default_boons = normalized_boons(default.boons)
-				if effective ~= nil then
-					local canonical = {}
-					if effective.priority ~= default.priority then canonical.priority = effective.priority end
-					if not same_boon_order(effective.boons, default_boons) then canonical.boons = copy_array(effective.boons) end
-					if effective.wet_boon ~= default.wet_boon then canonical.wet_boon = effective.wet_boon or 0 end
-					if effective.oil_boon ~= default.oil_boon then canonical.oil_boon = effective.oil_boon or 0 end
-					if next(canonical) ~= nil then cleaned[character_id] = canonical end
-				end
+			local effective = get_effective_rule(character_id, true)
+			local default_boons = normalized_boons(default.boons)
+			if effective ~= nil then
+				local canonical = {}
+				if override.enabled == false then canonical.enabled = false end
+				if effective.priority ~= default.priority then canonical.priority = effective.priority end
+				if not same_boon_order(effective.boons, default_boons) then canonical.boons = copy_array(effective.boons) end
+				if effective.wet_boon ~= default.wet_boon then canonical.wet_boon = effective.wet_boon or 0 end
+				if effective.oil_boon ~= default.oil_boon then canonical.oil_boon = effective.oil_boon or 0 end
+				if next(canonical) ~= nil then cleaned[character_id] = canonical end
 			end
 		end
 	end
@@ -171,8 +192,45 @@ end
 
 local function save_config()
 	normalize_enemy_overrides()
+	local custom_rule_count, disabled_rule_count = 0, 0
+	for _, override in pairs(config.enemy_overrides) do
+		custom_rule_count = custom_rule_count + 1
+		if override.enabled == false then disabled_rule_count = disabled_rule_count + 1 end
+	end
 	local ok, err = pcall(function() json.dump_file(CONFIG_FILE, config) end)
-	if ok then print("[SmartBoons] configuration saved") else print("[SmartBoons] configuration save failed: " .. tostring(err)) end
+	if ok then
+		if developer_mode_enabled() and LOG_ENABLED then
+			print(string.format("[%s] configuration saved: custom_rules=%d disabled_rules=%d", MOD_NAME, custom_rule_count, disabled_rule_count))
+			local character_ids = {}
+			for character_id in pairs(pending_config_rule_ids) do character_ids[#character_ids + 1] = character_id end
+			table.sort(character_ids)
+			for _, character_id in ipairs(character_ids) do
+				local override = config.enemy_overrides[character_id]
+				if override == nil then
+					local default = get_default_rule(character_id)
+					print(string.format("[%s] saved override removed: id=%s name=%s", MOD_NAME, character_id, default and default.name or "unknown"))
+				else
+				local fields = {}
+				if override.enabled == false then fields[#fields + 1] = "enabled=false" end
+				if override.priority ~= nil then fields[#fields + 1] = "priority=" .. tostring(override.priority) end
+				if type(override.boons) == "table" then
+					local boons = {}
+					for _, boon in ipairs(override.boons) do boons[#boons + 1] = BOON_NAMES[boon] or tostring(boon) end
+					fields[#fields + 1] = "boons=[" .. table.concat(boons, ", ") .. "]"
+				end
+				if override.wet_boon ~= nil then fields[#fields + 1] = "wet=" .. (BOON_NAMES[override.wet_boon] or "None") end
+				if override.oil_boon ~= nil then fields[#fields + 1] = "oil=" .. (BOON_NAMES[override.oil_boon] or "None") end
+				local default = get_default_rule(character_id)
+				print(string.format("[%s] saved override: id=%s name=%s fields=%s", MOD_NAME, character_id, default and default.name or "unknown", table.concat(fields, " | ")))
+				end
+			end
+		else
+			print("[SmartBoons] configuration saved")
+		end
+		pending_config_rule_ids = {}
+	else
+		print("[SmartBoons] configuration save failed: " .. tostring(err))
+	end
 	return ok
 end
 
@@ -626,6 +684,7 @@ end)
 local ui_state = {
 	selected_rule_id = nil,
 	rule_filter_mode = 1,
+	primary_boon_filter = 1,
 	rule_sort_mode = 1,
 	rule_show_mode = 1,
 	rule_family_filter = "All families",
@@ -635,10 +694,6 @@ local ui_state = {
 local UI_ITEM_WIDTH = 420
 local BOON_OPTIONS = { "None", "Fire Boon", "Ice Boon", "Thunder Boon" }
 local BOON_VALUES = { 0, 29, 30, 31 }
-local WET_OPTIONS = { "Use script default", "No special Boon", "Fire Boon", "Ice Boon", "Thunder Boon" }
-local WET_VALUES = { "default", 0, 29, 30, 31 }
-local OIL_OPTIONS = { "Use script default", "No special Boon", "Fire Boon", "Ice Boon", "Thunder Boon" }
-local OIL_VALUES = { "default", 0, 29, 30, 31 }
 
 -- Family presets are intentionally limited to variants that share a gameplay family.
 -- A preset is applied only when the user presses its button in the selected rule.
@@ -667,26 +722,29 @@ local function apply_rule_to_family(source_id, family)
 	local source_override = config.enemy_overrides[source_id]
 	local members = get_family_members(family)
 	if type(source_override) == "table" and source_override.enabled == false then
-		for _, id in ipairs(members) do config.enemy_overrides[id] = { enabled = false } end
+		for _, id in ipairs(members) do config.enemy_overrides[id] = { enabled = false }; mark_config_rule_changed(id) end
 		return #members
 	end
 	local source_rule = get_effective_rule(source_id)
 	if source_rule == nil then return 0 end
 	for _, id in ipairs(members) do
-		config.enemy_overrides[id] = {
-			enabled = true,
-			priority = source_rule.priority,
-			boons = copy_array(source_rule.boons),
-			wet_boon = source_rule.wet_boon or 0,
-			oil_boon = source_rule.oil_boon or 0,
+		local default = get_default_rule(id)
+		local override = {
 		}
+		local default_boons = normalized_boons(default.boons)
+		if source_rule.priority ~= default.priority then override.priority = source_rule.priority end
+		if not same_boon_order(source_rule.boons, default_boons) then override.boons = copy_array(source_rule.boons) end
+		if source_rule.wet_boon ~= default.wet_boon then override.wet_boon = source_rule.wet_boon or 0 end
+		if source_rule.oil_boon ~= default.oil_boon then override.oil_boon = source_rule.oil_boon or 0 end
+		config.enemy_overrides[id] = next(override) ~= nil and override or nil
+		mark_config_rule_changed(id)
 	end
 	return #members
 end
 
 local function restore_family_defaults(family)
 	local members = get_family_members(family)
-	for _, id in ipairs(members) do config.enemy_overrides[id] = nil end
+	for _, id in ipairs(members) do config.enemy_overrides[id] = nil; mark_config_rule_changed(id) end
 	return #members
 end
 
@@ -754,6 +812,7 @@ local function get_or_create_override(character_id)
 		override = {}
 		config.enemy_overrides[character_id] = override
 	end
+	mark_config_rule_changed(character_id)
 	return override
 end
 
@@ -773,6 +832,7 @@ re.on_draw_ui(function()
 	if not imgui.tree_node("SmartBoons") then return end
 	imgui.push_item_width(UI_ITEM_WIDTH)
 	imgui.text("Only changes a Boon after the Mage AI has decided to cast one.")
+	imgui.text("Changes apply immediately. Save configuration writes them to disk.")
 	local changed, value = imgui.checkbox("Enable Boon replacement", config.enabled)
 	if changed then config.enabled = value; ui_state.dirty = true end
 	changed, value = imgui.checkbox("Developer mode (diagnostic logs)", config.developer_mode)
@@ -786,17 +846,17 @@ re.on_draw_ui(function()
 	end
 
 	changed, value = imgui.drag_float("Max boss distance", config.max_boss_distance, 1.0, 1.0, 1000.0)
-	if changed then config.max_boss_distance = value; ui_state.dirty = true end
+	if changed then config.max_boss_distance = math.max(1.0, value); ui_state.dirty = true end
 	if imgui.is_item_hovered() then
 		imgui.set_tooltip("Maximum distance from the Arisen for a mapped boss to be considered. A boss outside this range cannot determine the Boon.")
 	end
 	changed, value = imgui.drag_float("Max common enemy distance", config.max_common_enemy_distance, 1.0, 1.0, 1000.0)
-	if changed then config.max_common_enemy_distance = value; ui_state.dirty = true end
+	if changed then config.max_common_enemy_distance = math.max(1.0, value); ui_state.dirty = true end
 	if imgui.is_item_hovered() then
 		imgui.set_tooltip("Maximum distance from the Arisen for a mapped common enemy to be considered. Common enemies are checked only when no boss qualifies.")
 	end
 	changed, value = imgui.drag_float("Distance tie range", config.distance_tie, 1.0, 0.0, 1000.0)
-	if changed then config.distance_tie = value; ui_state.dirty = true end
+	if changed then config.distance_tie = math.max(0.0, value); ui_state.dirty = true end
 	if imgui.is_item_hovered() then
 		imgui.set_tooltip("In Nearest mode, eligible bosses or common enemies within this distance of each other are treated as tied and priority decides the winner.")
 	end
@@ -815,6 +875,12 @@ re.on_draw_ui(function()
 	imgui.separator()
 	local rule_filter_options = { "All mapped enemies", "Bosses only", "Common enemies only" }
 	changed, ui_state.rule_filter_mode = imgui.combo("Rule category", ui_state.rule_filter_mode, rule_filter_options)
+	local primary_boon_options = { "All primary Boons", "Fire Boon", "Ice Boon", "Thunder Boon", "No primary Boon" }
+	local primary_boon_values = { nil, 29, 30, 31, 0 }
+	changed, ui_state.primary_boon_filter = imgui.combo("Primary Boon", ui_state.primary_boon_filter, primary_boon_options)
+	if imgui.is_item_hovered() then
+		imgui.set_tooltip("Filters by the first Boon in each enemy's effective normal priority order.")
+	end
 	local rule_sort_options = { "Priority (highest first)", "Name (A-Z)", "Family (grouped labels)" }
 	changed, ui_state.rule_sort_mode = imgui.combo("Sort rules by", ui_state.rule_sort_mode, rule_sort_options)
 	if ui_state.rule_sort_mode == 3 then
@@ -842,7 +908,11 @@ re.on_draw_ui(function()
 		local name_matches = search_text == "" or rule.name:lower():find(search_text, 1, true) ~= nil
 		local custom_matches = ui_state.rule_show_mode == 1 or type(config.enemy_overrides[id]) == "table"
 		local family_matches = ui_state.rule_sort_mode ~= 3 or ui_state.rule_family_filter == "All families" or get_rule_group_name(id) == ui_state.rule_family_filter
-		if category_matches and name_matches and custom_matches and family_matches then
+		local effective_rule = get_effective_rule(id)
+		local primary_boon = effective_rule and effective_rule.boons[1] or 0
+		local selected_primary_boon = primary_boon_values[ui_state.primary_boon_filter]
+		local primary_boon_matches = selected_primary_boon == nil or primary_boon == selected_primary_boon
+		if category_matches and primary_boon_matches and name_matches and custom_matches and family_matches then
 			rule_ids[#rule_ids + 1] = id
 		end
 	end
@@ -909,44 +979,53 @@ re.on_draw_ui(function()
 	if type(override) == "table" then
 		imgui.text_colored("Script default: " .. describe_effective_rule(default), 0xff66bb66)
 	end
-	local enabled_index = (type(override) == "table" and override.enabled == false) and 3 or ((type(override) == "table" and override.enabled == true) and 2 or 1)
-	changed, enabled_index = imgui.combo("Rule enabled", enabled_index, { "Use script default", "Enabled", "Disabled" })
+	local rule_enabled = not (type(override) == "table" and override.enabled == false)
+	changed, rule_enabled = imgui.checkbox("Rule enabled", rule_enabled)
 	if changed then
 		local target = get_or_create_override(character_id)
-		target.enabled = enabled_index == 1 and nil or enabled_index == 2
+		if rule_enabled then
+			target.enabled = nil
+		else
+			target.enabled = false
+		end
 		ui_state.dirty = true
 		override, effective = config.enemy_overrides[character_id], get_effective_rule(character_id)
 	end
 
-	local priority_value = (effective and effective.priority) or default.priority
-	changed, value = imgui.drag_int("Priority", priority_value, 1, 0, 1000)
-	if changed then get_or_create_override(character_id).priority = value; ui_state.dirty = true end
+	if not rule_enabled then
+		imgui.text("Enable this rule to edit its Boon settings.")
+	else
+		local priority_value = (effective and effective.priority) or default.priority
+		changed, value = imgui.drag_int("Priority", priority_value, 1, 0, 1000)
+		if changed then get_or_create_override(character_id).priority = math.max(0, value); ui_state.dirty = true end
 
-	local boons = (effective and effective.boons) or {}
-	for slot = 1, 3 do
-		local boon_index = index_for_value(BOON_VALUES, boons[slot] or 0)
-		changed, boon_index = imgui.combo("Boon priority " .. slot, boon_index, BOON_OPTIONS)
-		if changed then set_rule_boon_slot(character_id, slot, BOON_VALUES[boon_index]); ui_state.dirty = true end
-	end
+		local boons = (effective and effective.boons) or {}
+		for slot = 1, 3 do
+			local boon_index = index_for_value(BOON_VALUES, boons[slot] or 0)
+			changed, boon_index = imgui.combo("Boon priority " .. slot, boon_index, BOON_OPTIONS)
+			if changed then set_rule_boon_slot(character_id, slot, BOON_VALUES[boon_index]); ui_state.dirty = true end
+		end
 
-	override = config.enemy_overrides[character_id]
-	local wet_value = type(override) == "table" and override.wet_boon or "default"
-	changed, value = imgui.combo("When Wet", index_for_value(WET_VALUES, wet_value), WET_OPTIONS)
-	if changed then
-		get_or_create_override(character_id).wet_boon = WET_VALUES[value] == "default" and nil or WET_VALUES[value]
-		ui_state.dirty = true
-	end
-	if imgui.is_item_hovered() then
-		imgui.set_tooltip("When this target is Wet, the Mage uses this Boon at its next normal Boon opportunity. This does not force an immediate cast or interrupt another action.")
-	end
-	local oil_value = type(override) == "table" and override.oil_boon or "default"
-	changed, value = imgui.combo("When Oiled", index_for_value(OIL_VALUES, oil_value), OIL_OPTIONS)
-	if changed then
-		get_or_create_override(character_id).oil_boon = OIL_VALUES[value] == "default" and nil or OIL_VALUES[value]
-		ui_state.dirty = true
-	end
-	if imgui.is_item_hovered() then
-		imgui.set_tooltip("When this target is Oiled, the Mage uses this Boon at its next normal Boon opportunity. This does not force an immediate cast or interrupt another action.")
+		local wet_value = (effective and effective.wet_boon) or 0
+		changed, value = imgui.combo("When Wet", index_for_value(BOON_VALUES, wet_value), BOON_OPTIONS)
+		if changed then
+			local target = get_or_create_override(character_id)
+			target.wet_boon = BOON_VALUES[value]
+			ui_state.dirty = true
+		end
+		if imgui.is_item_hovered() then
+			imgui.set_tooltip("When this target is Wet, the Mage uses this Boon at its next normal Boon opportunity. This does not force an immediate cast or interrupt another action.")
+		end
+		local oil_value = (effective and effective.oil_boon) or 0
+		changed, value = imgui.combo("When Oiled", index_for_value(BOON_VALUES, oil_value), BOON_OPTIONS)
+		if changed then
+			local target = get_or_create_override(character_id)
+			target.oil_boon = BOON_VALUES[value]
+			ui_state.dirty = true
+		end
+		if imgui.is_item_hovered() then
+			imgui.set_tooltip("When this target is Oiled, the Mage uses this Boon at its next normal Boon opportunity. This does not force an immediate cast or interrupt another action.")
+		end
 	end
 
 	local family = get_rule_family(character_id)
@@ -957,13 +1036,17 @@ re.on_draw_ui(function()
 		if imgui.button("Apply selected settings to family") then
 			local changed_count = apply_rule_to_family(character_id, family)
 			ui_state.dirty = changed_count > 0 or ui_state.dirty
-			log(string.format("family preset applied: family=%s source=%s variants=%d", family.name, tostring(character_id), changed_count))
+			if developer_mode_enabled() then
+				local source_rule = get_effective_rule(character_id)
+				local priority = source_rule and source_rule.priority or nil
+				log(string.format("family preset applied: family=%s source=%s variants=%d priority=%s state=%s", family.name, tostring(character_id), changed_count, tostring(priority), describe_effective_rule(source_rule)))
+			end
 		end
 		imgui.same_line()
 		if imgui.button("Restore family defaults") then
 			local changed_count = restore_family_defaults(family)
 			ui_state.dirty = changed_count > 0 or ui_state.dirty
-			log(string.format("family defaults restored: family=%s variants=%d", family.name, changed_count))
+			if developer_mode_enabled() then log(string.format("family defaults restored: family=%s variants=%d", family.name, changed_count)) end
 		end
 		if imgui.is_item_hovered() then
 			imgui.set_tooltip("Removes saved overrides for every variant in this family. Click Save configuration to keep the change.")
@@ -972,18 +1055,22 @@ re.on_draw_ui(function()
 
 	if imgui.button("Restore selected script default") then
 		config.enemy_overrides[character_id] = nil
+		mark_config_rule_changed(character_id)
 		ui_state.dirty = true
 	end
 	imgui.same_line()
 	if imgui.button("Restore all script defaults") then
+		for id in pairs(config.enemy_overrides) do mark_config_rule_changed(id) end
+		local developer_mode = config.developer_mode
 		config = make_default_config()
+		config.developer_mode = developer_mode
 		ui_state.dirty = true
 	end
 	imgui.same_line()
-	if imgui.button("Save configuration") then
+	if imgui.button("Save configuration to disk") then
 		if save_config() then ui_state.dirty = false end
 	end
-	if ui_state.dirty then imgui.text_colored("Unsaved configuration changes", 0xff5252e0) end
+	if ui_state.dirty then imgui.text_colored("Changes are active now but not saved to disk", 0xff5252e0) end
 	imgui.pop_item_width()
 	imgui.tree_pop()
 end)
