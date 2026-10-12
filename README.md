@@ -31,7 +31,7 @@ For example, if three informative regions favor Ice and one favors Thunder:
 - A Mage without Ice but with Thunder uses Thunder.
 - A Mage with only Fire keeps Fire.
 
-If the current Boon ties for the best equipped choice, it is retained. Other unresolved ties use a stable Fire, Ice, then Thunder order. When elemental data is unavailable or provides no preference, the Mage AI's original choice is kept unless an enabled status rule applies.
+If the current Boon ties for the best equipped choice, it is retained. Other unresolved ties use a stable Fire, Ice, then Thunder order. Candidates with unavailable or neutral elemental data are skipped unless an equipped status priority applies. If no candidate supplies a recommendation, the Mage AI's original choice is kept.
 
 The target and its current data are checked at each Boon opportunity. A change in nearby enemies or enemy state can therefore change the next recommendation. SmartBoons does not force an immediate cast or immediately replace an active enchantment.
 
@@ -39,18 +39,20 @@ The target and its current data are checked at each Boon opportunity. A change i
 
 SmartBoons considers living enemies within the configured distance from the Arisen. Bosses are identified through the game's own boss flag.
 
-1. The closest eligible boss determines the Boon.
-2. If no boss is eligible, the closest eligible common enemy determines the Boon.
+1. If living bosses are in range, evaluate those bosses from nearest to farthest.
+2. Otherwise, evaluate common enemies from nearest to farthest.
+3. Use the first candidate that supplies an equipped status priority or a regional Boon recommendation.
+4. If none supplies a recommendation, keep the Mage AI's original choice.
 
 Default maximum distances are **50 m for bosses** and **25 m for common enemies**. Dead enemies, enemies outside their range, and enemies without a usable position are ignored. If a boss flag is unavailable, the enemy is considered common.
 
-For example, a boss at 30 m takes precedence over a common enemy at 5 m. Between two eligible bosses at 8 m and 45 m, the boss at 8 m determines the Boon.
+For example, an informative boss at 30 m takes precedence over a common enemy at 5 m. If a boss at 8 m has no preference or applicable status priority, an informative boss at 45 m can determine the Boon. When all in-range bosses lack a recommendation, the original Boon is kept; common enemies are considered only when no living boss is in range.
 
-Only the selected enemy's elemental preference and statuses are considered. With three common enemies that favor different elements, the closest one determines the recommendation; their weaknesses are not combined.
+Only the selected enemy's elemental preference and statuses determine the recommendation. A neutral common enemy at 3 m can be skipped in favor of an Ice-preferring enemy at 6 m, even with a Fire-preferring enemy at 10 m. Their weaknesses are not combined. An equipped status priority can make the closer neutral enemy a valid reference instead.
 
 ## Wet and Oiled rules
 
-Status priorities are optional and apply to the same selected enemy before regional voting. **Both are ignored by default.**
+Status priorities are optional and evaluated for each candidate before regional voting. An equipped status priority can make an otherwise neutral candidate valid. **Both are ignored by default.**
 
 ### When Wet
 
@@ -74,7 +76,7 @@ These rules affect the next normal Boon opportunity. They do not apply, remove, 
 
 ## Multiple Mages
 
-Equipment is checked separately for every Mage Pawn, including hired Pawns. Different Mages can therefore choose different Boons against the same target, depending on the skills each one has equipped.
+Equipment is checked separately for every Mage Pawn, including hired Pawns. Different Mages can therefore choose different Boons or use different reference enemies, depending on the skills each one has equipped.
 
 ## Automatic enemy evaluation
 
@@ -111,6 +113,7 @@ Diagnostic logs include:
 
 - The casting Pawn and the selected enemy's game name and ID.
 - Boss/common classification and distance from the Arisen.
+- The number of nearer candidates skipped, or candidates checked without a recommendation.
 - Wet/Oil readings and any applied status priority, when those rules are enabled.
 - Regional first- and second-place votes when regional voting is used.
 - The original and recommended Boons, and whether the choice was kept or replaced.

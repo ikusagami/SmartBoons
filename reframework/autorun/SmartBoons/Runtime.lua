@@ -105,14 +105,14 @@ local function closer(candidate, current)
 	return (R.call(candidate.character, "get_address") or 0) < (R.call(current.character, "get_address") or 0)
 end
 
-function R.select_target(config)
+function R.target_candidates(config)
 	local manager = singleton("app.EnemyManager")
 	local enemies = R.field(manager, "_EnemyList")
 	local count = R.number(R.call(enemies, "get_Count")) or 0
 	local characters = singleton("app.CharacterManager")
 	local player = R.call(characters, "get_ManualPlayer") or R.field(characters, "<ManualPlayer>k__BackingField")
 	local player_position = position(player)
-	local boss, common
+	local bosses, common = {}, {}
 	for index = 0, count - 1 do
 		local entry = R.managed(R.call(enemies, "get_Item", index) or R.field(enemies, index))
 		local character = R.field(entry, "_Chara") or R.field(entry, "<Chara>k__BackingField")
@@ -123,13 +123,15 @@ function R.select_target(config)
 			if meters <= limit then
 				local target = { character = character, id = R.character_id(character), distance = meters,
 					is_boss = is_boss, boss_source = boss_source }
-				if is_boss then
-					if closer(target, boss) then boss = target end
-				elseif closer(target, common) then common = target end
+				local candidates = is_boss and bosses or common
+				candidates[#candidates + 1] = target
 			end
 		end
 	end
-	return boss or common
+	-- A living boss in range keeps the search within the boss category.
+	local candidates = #bosses > 0 and bosses or common
+	table.sort(candidates, closer)
+	return candidates
 end
 
 function R.describe_target(target)

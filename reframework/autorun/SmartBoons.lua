@@ -69,11 +69,8 @@ local function save_pending_config()
 	if configuration_dirty and os.clock() >= state.next_config_save_at and save_config() then configuration_dirty = false end
 end
 
-local function get_expected_boon(controller, original_skill)
-	local target = R.select_target(config)
-	if target == nil then return nil, "no_active_target" end
-	local source = R.describe_target(target)
-	local equipped = R.equipped_boons(controller)
+local function evaluate_target(target, equipped, original_skill)
+	local source = ""
 	local wet_skill = WET_SKILLS[config.wet_preference]
 	if wet_skill ~= nil or config.oil_fire_priority then
 		local status = R.read_statuses(target.character)
@@ -91,9 +88,26 @@ local function get_expected_boon(controller, original_skill)
 		source = source .. " status_rules=ignored"
 	end
 	local profiles, reason = R.read_profiles(target.character)
-	if profiles == nil then return nil, source .. " " .. reason .. "; original Boon kept" end
+	if profiles == nil then return nil, source .. " " .. reason end
 	local selected, summary = choose_general_preference(profiles, equipped, original_skill)
 	return selected, source .. " " .. summary
+end
+
+local function get_expected_boon(controller, original_skill)
+	local candidates = R.target_candidates(config)
+	if #candidates == 0 then return nil, "no_active_target" end
+	local equipped = R.equipped_boons(controller)
+	local first_summary
+	for index, target in ipairs(candidates) do
+		local selected, summary = evaluate_target(target, equipped, original_skill)
+		first_summary = first_summary or summary
+		if selected ~= nil then
+			local skipped = index > 1 and " skipped=" .. (index - 1) or ""
+			return selected, R.describe_target(target) .. summary .. skipped
+		end
+	end
+	return nil, R.describe_target(candidates[1]) .. first_summary
+		.. " no_recommendation checked=" .. #candidates .. "; original Boon kept"
 end
 
 local function trace_pack_data(controller, pack_data)
@@ -159,7 +173,7 @@ local function install_pack_hook()
 			end
 		end)
 		state.pack_hook_installed = true
-		log("ActInterPack replacement hook installed; version=" .. MOD_VERSION .. " targeting=game IsBoss + nearest")
+		log("ActInterPack replacement hook installed; version=" .. MOD_VERSION .. " targeting=game IsBoss + nearest recommendation")
 	end)
 	if not state.pack_hook_installed then
 		local err = tostring(result)
@@ -176,7 +190,7 @@ re.on_draw_ui(function()
 	if not imgui.tree_node(MOD_NAME) then return end
 	imgui.push_item_width(300)
 	imgui.text("Automatic elemental preference | " .. MOD_VERSION)
-	imgui.text("Bosses first; nearest living enemy in each category.")
+	imgui.text("Bosses first; nearest enemy with a Boon recommendation.")
 	imgui.text("Only adjusts a Boon when the Mage AI chooses to cast one.")
 	local changed, value = imgui.checkbox("Enable Boon replacement", config.enabled)
 	if changed then config.enabled = value; configuration_dirty = true end
