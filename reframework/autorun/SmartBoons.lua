@@ -1,5 +1,5 @@
 local MOD_NAME = "SmartBoons"
-local MOD_VERSION = "2.1.3-dev"
+local MOD_VERSION = "2.0.0"
 local CONFIG_FILE = "SmartBoons_config.json"
 
 -- Script resets must reload the runtime helpers and voting policy.
