@@ -128,16 +128,32 @@ Compatibility with Pawn AI, enemy AI, elemental-effect, and action-pack mods has
 
 ## Bug reports
 
-Please include:
+### General information
 
-- SmartBoons, game, and REFramework versions.
-- The casting Mage's equipped Boons.
-- The target enemy and other nearby enemies.
-- Relevant settings or `SmartBoons_config.json`.
+- SmartBoons, game, and REFramework versions, including the exact nightly build number when applicable.
+- Other active mods and REFramework plugins, especially those affecting Pawn AI, skills, enemies, or elemental effects.
 - Reproduction steps, expected behavior, and actual behavior.
-- Relevant lines from `re2_framework_log.txt`.
+- Whether it happened once, happens intermittently, or can be reproduced consistently.
+- What you were doing: launching the game, loading a save, exploring, fighting, or exiting. Mention whether you had used **Reset scripts** in REFramework before the issue.
+- Your `reframework/data/SmartBoons_config.json`, if available, or the settings you used.
+- The **complete `re2_framework_log.txt`**, not just selected lines, and the approximate time of the issue.
 
-Enable Developer mode to capture the selected target and the reason for the Boon choice.
+If you can reproduce the issue, enable **Developer mode** in SmartBoons beforehand to capture the selected target and the reason for the Boon choice. Save a copy of the complete log after the issue occurs.
+
+### Boon selection issues
+
+- The casting Mage's equipped Boons. If multiple Mages are present, identify which Pawn made the unexpected choice.
+- The target enemy and other nearby enemies, including any variants added by mods.
+- The Boon you expected and the one actually chosen, plus any Wet/Oil status you observed.
+- Whether the Pawn attempted or completed the cast. A replacement log confirms the action-pack change, not a completed cast.
+
+### Crashes
+
+- Attach **`reframework_crash.dmp`**, if generated, from the same crash as the log. Both files are normally in the game folder, next to `DD2.exe`; you can zip them together.
+- Describe what happened immediately before the crash, including whether a Pawn was casting a Boon.
+- If you have tested the same situation with SmartBoons removed, report the result. Restart the game between comparisons; disabling Boon replacement in the menu still leaves the hook installed.
+
+Testing with other mods disabled can help isolate conflicts, but is not required to submit a report. Include any comparisons you have already tried.
 
 ## What SmartBoons does not do
 
