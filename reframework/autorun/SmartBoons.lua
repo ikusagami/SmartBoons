@@ -1,5 +1,5 @@
 local MOD_NAME = "SmartBoons"
-local MOD_VERSION = "2.0.0"
+local MOD_VERSION = "2.1.0"
 local CONFIG_FILE = "SmartBoons_config.json"
 
 -- Script resets must reload the runtime helpers and voting policy.
@@ -9,6 +9,7 @@ local function load_local_module(name)
 end
 local R = load_local_module("SmartBoons/Runtime")
 local choose_general_preference = load_local_module("SmartBoons/GeneralPreference")
+local make_grimoire_support = load_local_module("SmartBoons/Grimoires")
 
 local BOON_NAMES = { [29] = "Fire Boon", [30] = "Ice Boon", [31] = "Thunder Boon" }
 local WET_VALUES = { "ice", "thunder", "ignore" }
@@ -20,7 +21,9 @@ local BOON_PACK_PATH_BY_SKILL = {
 	[31] = "AppSystem/AI/ActionInterface/ActInterPackData/Job03_Mage/Job03_ThunderBoon.user",
 }
 
-local function log(message) print("[" .. MOD_NAME .. "] " .. tostring(message)) end
+local function log(message)
+	_G.log.info("[" .. MOD_NAME .. "] " .. tostring(message))
+end
 
 local function make_default_config()
 	return { version = 5, enabled = true, developer_mode = false, max_boss_distance = 50.0,
@@ -93,10 +96,10 @@ local function evaluate_target(target, equipped, original_skill)
 	return selected, source .. " " .. summary
 end
 
-local function get_expected_boon(controller, original_skill)
-	local candidates = R.target_candidates(config)
+local function get_expected_boon(controller, original_skill, available, reference_character)
+	local candidates = R.target_candidates(config, reference_character)
 	if #candidates == 0 then return nil, "no_active_target" end
-	local equipped = R.equipped_boons(controller)
+	local equipped = available or R.equipped_boons(controller)
 	local first_summary
 	for index, target in ipairs(candidates) do
 		local selected, summary = evaluate_target(target, equipped, original_skill)
@@ -109,6 +112,10 @@ local function get_expected_boon(controller, original_skill)
 	return nil, R.describe_target(candidates[1]) .. first_summary
 		.. " no_recommendation checked=" .. #candidates .. "; original Boon kept"
 end
+
+local grimoires = make_grimoire_support(R, config, function(character, original_skill, available)
+	return get_expected_boon(nil, original_skill, available, character)
+end, log)
 
 local function trace_pack_data(controller, pack_data)
 	if not config.enabled or pack_data == nil then return false end
@@ -128,8 +135,8 @@ local function trace_pack_data(controller, pack_data)
 			local expected, source = get_expected_boon(controller, skill)
 			if config.developer_mode then
 				local mode = expected == nil and "observe" or (skill == expected and "keep" or "replace")
-				log(string.format("boon candidate: actor=%s skill=%s (%s) enemy=%s expected=%s (%s) mode=%s",
-					R.character_id(R.actor_character(controller)), tostring(skill), BOON_NAMES[skill], source,
+				log(string.format("boon candidate: %s skill=%s (%s) enemy=%s expected=%s (%s) mode=%s",
+					R.describe_actor(R.actor_character(controller)), tostring(skill), BOON_NAMES[skill], source,
 					tostring(expected), BOON_NAMES[expected] or "none", mode))
 			end
 			if expected ~= nil and expected ~= skill then return true, expected, skill, controller end
@@ -183,6 +190,7 @@ end
 
 re.on_application_entry("LateUpdateBehavior", function()
 	install_pack_hook()
+	grimoires.install()
 	save_pending_config()
 end)
 
@@ -191,15 +199,15 @@ re.on_draw_ui(function()
 	imgui.push_item_width(300)
 	imgui.text("Automatic elemental preference | " .. MOD_VERSION)
 	imgui.text("Bosses first; nearest enemy with a Boon recommendation.")
-	imgui.text("Only adjusts a Boon when the Mage AI chooses to cast one.")
+	imgui.text("Adjusts native Mage Boon casts and Pawn Boon grimoire choices.")
 	local changed, value = imgui.checkbox("Enable Boon replacement", config.enabled)
 	if changed then config.enabled = value; configuration_dirty = true end
 	changed, value = imgui.drag_float("Max boss distance", config.max_boss_distance, 1.0, 1.0, 1000.0)
 	if changed then config.max_boss_distance = positive_distance(value, config.max_boss_distance); configuration_dirty = true end
-	if imgui.is_item_hovered() then imgui.set_tooltip("Maximum distance from the Arisen. Bosses are identified by the game's IsBoss flag.") end
+	if imgui.is_item_hovered() then imgui.set_tooltip("Boss range: measured from the Arisen for Mage skills, or from the casting Pawn for grimoires. Bosses use the game's IsBoss flag.") end
 	changed, value = imgui.drag_float("Max common enemy distance", config.max_common_enemy_distance, 1.0, 1.0, 1000.0)
 	if changed then config.max_common_enemy_distance = positive_distance(value, config.max_common_enemy_distance); configuration_dirty = true end
-	if imgui.is_item_hovered() then imgui.set_tooltip("Common enemies are considered only when no living boss is in range.") end
+	if imgui.is_item_hovered() then imgui.set_tooltip("Common-enemy range: measured from the Arisen for Mage skills, or from the casting Pawn for grimoires. Used only when no living boss is in range.") end
 	local wet_index = 1
 	for index, preference in ipairs(WET_VALUES) do if preference == config.wet_preference then wet_index = index end end
 	changed, value = imgui.combo("When Wet", wet_index, WET_OPTIONS)

@@ -1,10 +1,10 @@
 # SmartBoons
 
-SmartBoons is an REFramework mod for *Dragon's Dogma 2* that improves how Mage Pawns choose elemental Boons using the selected enemy's current Fire, Ice, and Thunder multipliers.
+SmartBoons is an REFramework mod for *Dragon's Dogma 2* that improves elemental Boon choices using the selected enemy's current Fire, Ice, and Thunder multipliers. It supports equipped Mage Boon skills and elemental Boon grimoires used by party Pawns.
 
-After the game AI decides to cast a Boon, SmartBoons checks the target and the casting Mage's equipped skills. It can replace the chosen element with the enemy's general elemental preference or an enabled Wet/Oil priority.
+After the game AI decides to cast a Boon or use a Boon grimoire, SmartBoons checks nearby enemies and the elements available to that Pawn. It can replace the chosen element with the enemy's general elemental preference or an enabled Wet/Oil priority.
 
-The game still decides whether and when to cast. SmartBoons never gives a Mage a Boon it does not have equipped.
+The game still decides whether and when to act. Mage casts use only that Mage's equipped Boons; grimoire choices use only books carried by the reading Pawn, regardless of vocation.
 
 ## Installation
 
@@ -12,7 +12,7 @@ The game still decides whether and when to cast. SmartBoons never gives a Mage a
 2. Copy `SmartBoons.lua` and the `SmartBoons` folder to `<Dragon's Dogma 2>/reframework/autorun/`.
 3. Launch the game and open **SmartBoons** from the REFramework script menu.
 
-Keep both modules inside the `SmartBoons` folder. If installing while the game is running, reload scripts in REFramework or restart the game.
+Keep all three modules inside the `SmartBoons` folder. If installing while the game is running, reload scripts in REFramework or restart the game.
 
 ## How it works
 
@@ -20,10 +20,10 @@ SmartBoons reads the selected enemy's current elemental multipliers across its a
 
 - The element with the highest multiplier receives a first-place vote.
 - Elements tied for first place share that vote.
-- Second-place votes break equal first-place totals and help rank the remaining equipped candidates.
+- Second-place votes break equal first-place totals and help rank the remaining available candidates.
 - Regions with equal Fire, Ice, and Thunder multipliers contribute no preference.
 
-The highest-ranked equipped Boon is selected separately for each Mage. A larger multiplier does not give a region extra vote weight.
+The highest-ranked available element is selected separately for each Pawn: equipped Boons for Mage casts, or carried Boon books for grimoire use. Multipliers determine the elemental ranking within each region: if Thunder has a higher multiplier than Ice, Thunder ranks above Ice in that region. Each informative region contributes the same total first-place vote, regardless of how large its winning multiplier is.
 
 For example, if three informative regions favor Ice and one favors Thunder:
 
@@ -31,52 +31,85 @@ For example, if three informative regions favor Ice and one favors Thunder:
 - A Mage without Ice but with Thunder uses Thunder.
 - A Mage with only Fire keeps Fire.
 
-If the current Boon ties for the best equipped choice, it is retained. Other unresolved ties use a stable Fire, Ice, then Thunder order. Candidates with unavailable or neutral elemental data are skipped unless an equipped status priority applies. If no candidate supplies a recommendation, the Mage AI's original choice is kept.
+If the current element ties for the best available choice, it is retained. Other unresolved ties use a stable Fire, Ice, then Thunder order. Enemies with unavailable or neutral elemental data are skipped unless an available status priority applies. If no candidate supplies a recommendation, the AI's original choice is kept.
 
 The target and its current data are checked at each Boon opportunity. A change in nearby enemies or enemy state can therefore change the next recommendation. SmartBoons does not force an immediate cast or immediately replace an active enchantment.
 
 ## Boss and common-enemy targeting
 
-SmartBoons considers living enemies within the configured distance from the Arisen. Bosses are identified through the game's own boss flag.
+SmartBoons considers living enemies within the configured distance. Bosses are identified through the game's own boss flag. The distance reference depends on the action:
+
+- **Mage Boon skill:** distance from the Arisen.
+- **Boon grimoire:** distance from the Pawn using the book.
+
+Both use the same **Max boss distance** and **Max common enemy distance** settings. There is no separate grimoire range setting.
 
 1. If living bosses are in range, evaluate those bosses from nearest to farthest.
 2. Otherwise, evaluate common enemies from nearest to farthest.
-3. Use the first candidate that supplies an equipped status priority or a regional Boon recommendation.
-4. If none supplies a recommendation, keep the Mage AI's original choice.
+3. Use the first candidate that supplies an available status priority or a regional Boon recommendation.
+4. If none supplies a recommendation, keep the AI's original choice.
 
 Default maximum distances are **50 m for bosses** and **25 m for common enemies**. Dead enemies, enemies outside their range, and enemies without a usable position are ignored. If a boss flag is unavailable, the enemy is considered common.
 
 For example, an informative boss at 30 m takes precedence over a common enemy at 5 m. If a boss at 8 m has no preference or applicable status priority, an informative boss at 45 m can determine the Boon. When all in-range bosses lack a recommendation, the original Boon is kept; common enemies are considered only when no living boss is in range.
 
-Only the selected enemy's elemental preference and statuses determine the recommendation. A neutral common enemy at 3 m can be skipped in favor of an Ice-preferring enemy at 6 m, even with a Fire-preferring enemy at 10 m. Their weaknesses are not combined. An equipped status priority can make the closer neutral enemy a valid reference instead.
+Only the selected enemy's elemental preference and statuses determine the recommendation. A neutral common enemy at 3 m can be skipped in favor of an Ice-preferring enemy at 6 m, even with a Fire-preferring enemy at 10 m. Their weaknesses are not combined. An available status priority can make the closer neutral enemy a valid reference instead.
 
 ## Wet and Oiled rules
 
-Status priorities are optional and evaluated for each candidate before regional voting. An equipped status priority can make an otherwise neutral candidate valid. **Both are ignored by default.**
+Status priorities are optional and evaluated for each candidate before regional voting. They apply to both Mage skills and Boon grimoires, provided the corresponding skill is equipped or book is carried by that Pawn. An available status priority can make an otherwise neutral candidate valid. **Both are ignored by default.**
 
 ### When Wet
 
 Choose one option:
 
-- **Ice:** prioritize Ice Boon if that Mage has it equipped.
-- **Thunder:** prioritize Thunder Boon if that Mage has it equipped.
+- **Ice:** prioritize Ice if the Mage has Ice Boon equipped, or the reading Pawn carries Hiemal Euphony.
+- **Thunder:** prioritize Thunder if the Mage has Thunder Boon equipped, or the reading Pawn carries Thunderous Concord.
 - **Ignore** (default): use the normal regional preference.
 
-Wet prioritizes only the selected element. If that Boon is not equipped, SmartBoons returns to regional voting, which may select any equipped element, including Fire.
+Wet prioritizes only the selected element. If the corresponding skill or book is unavailable, SmartBoons returns to regional voting, which may select any available element, including Fire. There is no Ice-to-Thunder or Thunder-to-Ice fallback sequence in the Wet rule.
 
 ### When Oiled
 
-Enable **When Oiled: prioritize Fire** to prioritize Fire Boon against an Oiled target. This option is **disabled by default**.
+Enable **When Oiled: prioritize Fire** to prioritize equipped Fire Boon or a carried Igneous Melody against an Oiled target. This option is **disabled by default**.
 
-If Fire is not equipped or the option is disabled, SmartBoons uses the normal regional preference.
+If the Fire skill or book is unavailable, or the option is disabled, SmartBoons uses the normal regional preference.
 
-SmartBoons reads the actual status on the target. Rain alone does not trigger the Wet rule. If the status cannot be read, no status priority is applied. A recognized status can select its equipped Boon even when elemental-region data is unavailable.
+SmartBoons reads the actual status on the target. Rain alone does not trigger the Wet rule. If the status cannot be read, no status priority is applied. A recognized status can select its available element even when elemental-region data is unavailable.
 
 These rules affect the next normal Boon opportunity. They do not apply, remove, or simulate enemy statuses.
 
-## Multiple Mages
+## Boon grimoires
+
+When a party Pawn's AI decides to use one of these books, SmartBoons can correct its element:
+
+| Grimoire | Item ID | Element |
+| --- | --- | --- |
+| Igneous Melody | 181 | Fire |
+| Hiemal Euphony | 182 | Ice |
+| Thunderous Concord | 183 | Thunder |
+
+This works with any Pawn vocation, provided the Pawn can already use grimoires. SmartBoons does not grant that ability or make the Pawn decide to use a book.
+
+Only books with a positive quantity in the reading Pawn's own inventory are considered. Books carried by the Arisen, another Pawn, or held in storage are not substitutes. Equipped Mage skills do not restrict grimoire choices.
+
+The same boss priority, regional voting, and optional Wet/Oil rules apply. Enemy distance is measured from the reading Pawn, using the existing boss/common range settings.
+
+For example, when the enemy's regional ranking is Ice, then Thunder, then Fire:
+
+- With all three books, select Hiemal Euphony (Ice).
+- Without Ice but with Thunder, select Thunderous Concord.
+- With only Fire, keep Igneous Melody, even though the enemy prefers another element.
+
+Availability is checked at each use. If the inventory cannot be read, the originally selected book is no longer available, or no enemy supplies a recommendation, the original decision is left to the game.
+
+The game handles the selected book's consumption, casting, cancellation, and effect recipient. SmartBoons does not create or transform books, consume items directly, or change who receives the enchantment. Manual Arisen use and other types of grimoires are unchanged.
+
+## Multiple Pawns
 
 Equipment is checked separately for every Mage Pawn, including hired Pawns. Different Mages can therefore choose different Boons or use different reference enemies, depending on the skills each one has equipped.
+
+Grimoire availability and enemy distance are likewise evaluated separately for each reading Pawn.
 
 ## Automatic enemy evaluation
 
@@ -90,11 +123,11 @@ Open **SmartBoons** from the REFramework script menu.
 
 | Option | Default | Behavior |
 | --- | --- | --- |
-| Enable Boon replacement | Enabled | Allows SmartBoons to adjust the chosen Boon. |
-| Max boss distance | 50 m | Maximum boss distance from the Arisen. |
-| Max common enemy distance | 25 m | Maximum common-enemy distance from the Arisen. |
+| Enable Boon replacement | Enabled | Allows SmartBoons to adjust Mage Boon skills and Pawn Boon grimoires. |
+| Max boss distance | 50 m | Maximum boss distance from the Arisen for Mage skills, or from the reading Pawn for grimoires. |
+| Max common enemy distance | 25 m | Maximum common-enemy distance from the Arisen for Mage skills, or from the reading Pawn for grimoires. |
 | When Wet | Ignore | Prioritize Ice, prioritize Thunder, or ignore Wet. |
-| When Oiled: prioritize Fire | Disabled | Prioritize equipped Fire against an Oiled target. |
+| When Oiled: prioritize Fire | Disabled | Prioritize an available Fire skill or Boon book against an Oiled target. |
 | Developer mode (diagnostic logs) | Disabled | Enable detailed target and decision logs. |
 
 All changes apply immediately and are saved automatically to:
@@ -109,22 +142,21 @@ If saving fails, changes remain active for the current session. The menu shows a
 
 Normal logs report hook installation and failures. Enable **Developer mode** for detailed Boon-candidate and replacement logs.
 
+SmartBoons uses REFramework's native logging API (`log.info`) to write messages to `re2_framework_log.txt` in the game folder.
+
 Diagnostic logs include:
 
-- The casting Pawn and the selected enemy's game name and ID.
-- Boss/common classification and distance from the Arisen.
+- The casting Pawn's ID and native name (`actor_name`), plus the selected enemy's game name and ID. The Pawn's displayed name or moniker follows the game's name-display setting; if unavailable, only its ID is shown.
+- Boss/common classification and distance from the Arisen for Mage skills, or from the reading Pawn for grimoires.
 - The number of nearer candidates skipped, or candidates checked without a recommendation.
 - Wet/Oil readings and any applied status priority, when those rules are enabled.
 - Regional first- and second-place votes when regional voting is used.
 - The original and recommended Boons, and whether the choice was kept or replaced.
+- For grimoires, the original and recommended item IDs, `owned[F=... I=... T=...]` book quantities, and `distance_origin=pawn`.
 
-If a game name is unavailable, the enemy ID is shown. `ActInter pack argument replaced` confirms a replacement at dispatch; it does not confirm that the cast finished.
+If a game name is unavailable, the enemy ID is shown. `mode=replace` indicates a different recommended element; `mode=keep` means the original element is already the best available choice; `mode=observe` means no recommendation was obtained and the original choice is retained.
 
-## Compatibility
-
-Other mods that change Mage Pawn Boon decisions, enemy elemental data, or the same AI action packs may affect SmartBoons' behavior.
-
-Compatibility with Pawn AI, enemy AI, elemental-effect, and action-pack mods has not been broadly tested.
+`ActInter pack argument replaced` confirms a Mage action-pack replacement. `Grimoire selection replaced: from=183 to=182`, for example, confirms a change from Thunderous Concord to Hiemal Euphony. Neither message confirms that the cast completed or the item was consumed.
 
 ## Bug reports
 
@@ -142,26 +174,30 @@ If you can reproduce the issue, enable **Developer mode** in SmartBoons beforeha
 
 ### Boon selection issues
 
-- The casting Mage's equipped Boons. If multiple Mages are present, identify which Pawn made the unexpected choice.
+- Whether the issue involved a Mage Boon skill or a Boon grimoire, and which Pawn made the unexpected choice.
+- For Mage skills, the casting Mage's equipped Boons.
+- For grimoires, the reading Pawn's vocation and the quantities of Igneous Melody, Hiemal Euphony, and Thunderous Concord in that Pawn's own inventory before use. Mention which book was consumed, if known.
 - The target enemy and other nearby enemies, including any variants added by mods.
 - The Boon you expected and the one actually chosen, plus any Wet/Oil status you observed.
-- Whether the Pawn attempted or completed the cast. A replacement log confirms the action-pack change, not a completed cast.
+- Whether the Pawn attempted or completed the cast. A replacement log confirms the selection change, not a completed cast or item consumption.
 
 ### Crashes
 
 - Attach **`reframework_crash.dmp`**, if generated, from the same crash as the log. Both files are normally in the game folder, next to `DD2.exe`; you can zip them together.
-- Describe what happened immediately before the crash, including whether a Pawn was casting a Boon.
-- If you have tested the same situation with SmartBoons removed, report the result. Restart the game between comparisons; disabling Boon replacement in the menu still leaves the hook installed.
+- Describe what happened immediately before the crash, including whether a Pawn was casting a Boon or using a grimoire.
+- If you have tested the same situation with SmartBoons removed, report the result. Restart the game between comparisons; disabling Boon replacement in the menu still leaves the hooks installed.
 
 Testing with other mods disabled can help isolate conflicts, but is not required to submit a report. Include any comparisons you have already tried.
 
 ## What SmartBoons does not do
 
-- Force a Mage to cast a Boon or interrupt unrelated actions.
+- Force a Pawn to cast a Boon or use a grimoire, or interrupt unrelated actions.
 - Give a Mage an unequipped Boon.
+- Grant grimoire-use abilities, create books, or borrow another character's inventory.
+- Change the recipient of a grimoire's enchantment.
 - Apply, remove, or simulate enemy statuses.
 - Combine the weaknesses of multiple nearby enemies.
-- Weight regions by multiplier magnitude, part HP, accessibility, or recent hits.
+- Give a region extra votes because its winning multiplier is larger, or because of its part HP, accessibility, or recent hits.
 
 ## Files
 
@@ -173,7 +209,8 @@ reframework/
 |   |-- SmartBoons.lua
 |   `-- SmartBoons/
 |       |-- Runtime.lua
-|       `-- GeneralPreference.lua
+|       |-- GeneralPreference.lua
+|       `-- Grimoires.lua
 `-- data/
     `-- SmartBoons_config.json   (saved automatically)
 ```
@@ -181,5 +218,6 @@ reframework/
 - `SmartBoons.lua` contains configuration, UI, status priorities, logging, and the Boon replacement hook.
 - `Runtime.lua` reads enemies, names, boss classification, statuses, elemental regions, and the casting Mage's equipment.
 - `GeneralPreference.lua` contains the regional voting policy.
+- `Grimoires.lua` checks the reading Pawn's own books and corrects its native Boon grimoire choice.
 
-All three Lua files are required. Keep their names and folder structure intact. The configuration file is created when an option is changed and saved successfully.
+All four Lua files are required. Keep their names and folder structure intact. The configuration file is created when an option is changed and saved successfully. Research probes are not required to use SmartBoons.

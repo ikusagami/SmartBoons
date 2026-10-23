@@ -50,6 +50,23 @@ function R.character_id(character)
 	return address ~= nil and string.format("0x%X", address) or "unknown"
 end
 
+function R.describe_actor(character)
+	local description = "actor=" .. R.character_id(character)
+	local human = R.call(character, "get_Human") or R.field(character, "<Human>k__BackingField")
+	local context = R.field(human, "<PawnDataContext>k__BackingField")
+	if context == nil then return description end
+	local function clean(value)
+		if type(value) ~= "string" then return nil end
+		value = value:gsub("%c", " "):match("^%s*(.-)%s*$")
+		return value ~= "" and value or nil
+	end
+	local use_nickname = R.truthy(R.call(singleton("app.GuiManager"), "get_IsUseNickName"))
+	local name = use_nickname and clean(R.field(context, "_Nickname")) or nil
+	name = name or clean(R.field(context, "_Name"))
+	if name ~= nil then description = description .. string.format(" actor_name=%q", name) end
+	return description
+end
+
 function R.character_name(character)
 	local id = R.character_id(character)
 	if name_method == nil then
@@ -105,20 +122,22 @@ local function closer(candidate, current)
 	return (R.call(candidate.character, "get_address") or 0) < (R.call(current.character, "get_address") or 0)
 end
 
-function R.target_candidates(config)
+function R.target_candidates(config, reference_character)
 	local manager = singleton("app.EnemyManager")
 	local enemies = R.field(manager, "_EnemyList")
 	local count = R.number(R.call(enemies, "get_Count")) or 0
-	local characters = singleton("app.CharacterManager")
-	local player = R.call(characters, "get_ManualPlayer") or R.field(characters, "<ManualPlayer>k__BackingField")
-	local player_position = position(player)
+	if reference_character == nil then
+		local characters = singleton("app.CharacterManager")
+		reference_character = R.call(characters, "get_ManualPlayer") or R.field(characters, "<ManualPlayer>k__BackingField")
+	end
+	local reference_position = position(reference_character)
 	local bosses, common = {}, {}
 	for index = 0, count - 1 do
 		local entry = R.managed(R.call(enemies, "get_Item", index) or R.field(enemies, index))
 		local character = R.field(entry, "_Chara") or R.field(entry, "<Chara>k__BackingField")
 		if R.is_alive(character) then
 			local is_boss, boss_source = R.is_boss(character)
-			local meters = distance(position(character), player_position)
+			local meters = distance(position(character), reference_position)
 			local limit = is_boss and config.max_boss_distance or config.max_common_enemy_distance
 			if meters <= limit then
 				local target = { character = character, id = R.character_id(character), distance = meters,
